@@ -29,10 +29,14 @@ Clean style with emoji buttons and a short welcome text. English, Русский
 Categories and products are read live from henderson.am (refreshed every 30 minutes), so there is nothing to update by hand.
 
 ## Run
-```bash
-cd "/Users/varuj/CLAUDE /henderson-bot" && python3 bot.py
-```
-The bot works only while this is running and the Mac is on. Stop it with Ctrl+C.
+The bot runs on **Railway** (project `henderson-bot`, service `bot`), so it works when the Mac is off.
+- Code comes from the private GitHub repo `varujanharutyunyan-5/Henderson-bot` (branch `main`); every `git push` redeploys it.
+- Railway variables: `BOT_TOKEN` (Telegram token from @BotFather), `ADMIN_CHAT_ID` (chat that receives requests), `DATA_DIR=/data`.
+- Saved data (`langs.json`, `admin.json`) lives on the Railway volume `bot-data` mounted at `/data`.
+- Railway trial: 30 days or $5, then a paid plan is needed to keep it running.
+
+**Don't run `python3 bot.py` on the Mac while Railway is running** – two copies conflict and messages get lost.
+To test locally, stop the Railway service first.
 
 ## Files
 - `bot.py`: the bot (plain Python, nothing to install)
