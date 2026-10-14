@@ -30,6 +30,10 @@ def load_token():
             for line in f:
                 if line.startswith("BOT_TOKEN="):
                     token = line.split("=", 1)[1].strip()
+    # forgive paste mistakes: spaces, quotes, or "BOT_TOKEN=" pasted into the value
+    token = (token or "").strip().strip("'\"").strip()
+    if token.startswith("BOT_TOKEN="):
+        token = token.split("=", 1)[1].strip().strip("'\"")
     return token
 
 
