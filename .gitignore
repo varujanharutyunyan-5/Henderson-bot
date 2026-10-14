@@ -1,0 +1,9 @@
+# secrets and saved data – never upload
+.env
+admin.json
+langs.json
+# Mac-only certificate file (servers have their own)
+certs.pem
+__pycache__/
+*.pyc
+.DS_Store
