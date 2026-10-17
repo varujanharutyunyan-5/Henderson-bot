@@ -106,7 +106,7 @@ _cache = {}  # url -> (time, page)
 
 def fetch_raw(url):
     req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
-    with urllib.request.urlopen(req, timeout=30, context=SSL_CTX) as resp:
+    with urllib.request.urlopen(req, timeout=60, context=SSL_CTX) as resp:  # the site can be slow
         return resp.read().decode("utf-8", "replace")
 
 
@@ -376,9 +376,10 @@ def index_loop():
     while True:
         try:
             build_index()
+            time.sleep(INDEX_HOURS * 3600)
         except Exception as e:
-            print("Search list failed, retrying later:", e)
-        time.sleep(INDEX_HOURS * 3600)
+            print("Search list failed, retrying in 5 minutes:", e)
+            time.sleep(300)
 
 
 def search_products(q):
