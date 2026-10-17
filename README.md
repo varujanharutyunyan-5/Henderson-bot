@@ -6,19 +6,24 @@ Telegram bot **@Delavdebot** for the Henderson shop ([henderson.am](https://hend
 Clean style with emoji buttons and a short welcome text. English, Русский, Հայերեն.
 
 - `/start` → first time: choose a language; then the logo photo `welcome.png` with the main menu:
-  - **🛍 Catalog** → sections (Suits, Winter clothes, Shirts & polos, Trousers & jeans, Sportswear, Shoes, Bags, Accessories, Home & underwear, Other) → the site's categories → products
+  - **🔍 Search** → type a word in English, Russian or Armenian (coat, пальто, վերարկու, black jeans). Typing any text in the chat also searches.
+  - **🛍 Catalog** → sections (Suits, Winter clothes, Shirts & polos, Trousers & jeans, Sportswear, Shoes, Bags, Accessories, Home & underwear, 🎁 Gifts, 👜 Unisex, Other) → the site's categories → products
   - **📏 Sizes & measuring** → how to measure yourself + approximate size table (general guide, not from the site)
   - **✂️ Tailoring & fitting** → services; free within 30 days of purchase; 24 h–7 days
   - **🧵 Made-to-measure** → Su Misura suits and shirts (also women's shirts)
   - **📍 Stores & contacts** → 3 Yerevan stores, hours, phones, hotline
   - **🚚 Delivery & returns** → free delivery to stores, 30-day returns, guarantee
-  - **🎁 Promotions** → current offers (static text – update when offers change)
+  - **🏷 Promotions** → read live from henderson.am/offers/ (ended offers are hidden; known offers are translated in `PROMO_NAMES`)
   - **📩 Contact us** → general request (order, reserve, fitting, made-to-measure, other) → store → message → phone
   - **📞 Call the store** → store phones and hotline
   - **🌐 Language**
 - Every product has **📩 Order / Reserve** (order or reserve to try on → store → size → phone) and **📞 Call**.
 - Requests are sent to the admin chat with the product photo, name, colour, price, size, store, customer name and phone.
-  **Setup:** send `/admin` to the bot once from the chat that should receive requests. It's saved in `admin.json`; delete that file to change the admin chat.
+  **Admins:** the first person to send `/admin` becomes admin. An admin sends `/admin` to open the admin panel:
+  **➕ Invite admin** makes a one-time link (24 h) for a new admin; **🚪 Stop being admin** leaves. Several admins all get every request.
+  To hand over: invite the new person, then tap 🚪 Stop being admin.
+- **Trial reminder:** admins get a message 5 days and 1 day before `TRIAL_END` (Railway variable, default 2026-11-13).
+- **Search list:** built in the background from every catalog page (about 15–20 minutes, gently), refreshed every 12 hours, saved as `search-index.json` so it's ready after a restart.
 - Info page texts are in `INFO` in `translations.py` (facts taken from henderson.am in October 2026). Prices for made-to-measure and paid tailoring weren't on the site, so they say "ask in store".
 - Sections are set in `GROUPS` in `bot.py`. Site categories not listed there go to **Other** automatically.
 - A category shows one product per message (photo, name, colour, price in ֏ with approximate USD and RUB in italics, using daily rates from open.er-api.com). **<** and **>** flip through them in place.

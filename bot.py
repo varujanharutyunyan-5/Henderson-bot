@@ -8,13 +8,14 @@ import json
 import os
 import re
 import ssl
+import threading
 import time
 import urllib.error
 import urllib.request
 import uuid
 
-from translations import (CATEGORY_NAMES, GROUP_ICONS, GROUP_NAMES, INFO, LANG_BUTTONS, LANGS, MENU_BUTTONS,
-                          ORDER, STORES, UI)
+from translations import (ADMIN, CATEGORY_NAMES, GROUP_ICONS, GROUP_NAMES, INFO, LANG_BUTTONS, LANGS,
+                          MENU_BUTTONS, ORDER, PROMO, PROMO_NAMES, SEARCH, SEARCH_WORDS, STORES, UI)
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 SITE = "https://henderson.am"
@@ -78,6 +79,7 @@ def call(method, params=None, timeout=60, upload=None):
 
 
 sent = {}  # chat_id -> ids of messages on the current page
+BOT = {"username": ""}  # filled in at start
 
 
 def post(chat_id, method, params, upload=None):
@@ -205,6 +207,11 @@ GROUPS = [
     ("Accessories", ["+/catalog/accessories"]),
     ("Home & underwear", ["/catalog/domashnyya-odejda", "/catalog/pijamy",
                             "/catalog/muzhskoe-nizhnee-belyo", "/catalog/socks"]),
+    ("Gifts", ["/catalog/gift-cards-am", "/catalog/gift-box", "/catalog/ties", "/catalog/fragrance",
+               "/catalog/muzhskie-koshelki-portmone-i-zazhimy", "/catalog/cuff-links-tie-clips",
+               "/catalog/muzhskie-kluchnicy-vizitnicy-oblozhki"]),
+    ("Unisex", ["/catalog/umbrellas", "/catalog/glasses", "/catalog/scarves", "/catalog/gloves",
+                "/catalog/rjukzaki", "/catalog/roadbags", "/catalog/suitcase"]),
 ]
 
 
@@ -322,6 +329,148 @@ def other_prices(amd):
     return f"≈ ${usd:,} · ≈ {rub:,.0f} ₽".replace(",", " ")
 
 
+# ---------- search ----------
+
+INDEX_HOURS = 12      # rebuild the search list this often
+INDEX_PAUSE = 1.5     # seconds between category pages, to go easy on the site
+index = {"items": [], "time": 0}
+searches = {}  # chat_id -> {"q": text, "items": [...]} – the last search results
+INDEX_FILE = os.path.join(os.environ.get("DATA_DIR", HERE), "search-index.json")
+
+
+def build_index():
+    """Read every category page once and collect all products (runs in the background)."""
+    # every catalog page: the menu plus all catalog links on the home page (e.g. belts aren't in the menu)
+    tops = {n["link"].rstrip("/") for n in load_menu() if n["parent"] is None}
+    links = {n["link"].rstrip("/") for n in load_menu()}
+    links |= {l.rstrip("/") for l in re.findall(r'href="(/catalog/[^"?#]+)"', fetch(SITE + "/"))}
+    found = {}
+    for link in sorted(links - tops):
+        slug = link.split("/")[-1]
+        try:
+            for item in load_products(link):
+                entry = found.setdefault(item["url"], {**item, "cats": set()})
+                entry["cats"].add(slug)
+        except Exception as e:
+            print("Search list: skipped a page:", e)
+        time.sleep(INDEX_PAUSE)
+    index.update(items=list(found.values()), time=time.time())
+    print(f"Search list ready: {len(index['items'])} products")
+    try:  # keep a copy so the search works right after a restart
+        with open(INDEX_FILE, "w") as f:
+            json.dump({"time": index["time"],
+                       "items": [{**p, "cats": sorted(p["cats"])} for p in index["items"]]}, f)
+    except OSError as e:
+        print("Could not save the search list:", e)
+
+
+def index_loop():
+    try:  # start from the saved copy, then refresh it when it's old
+        with open(INDEX_FILE) as f:
+            saved = json.load(f)
+        index.update(items=[{**p, "cats": set(p["cats"])} for p in saved["items"]], time=saved["time"])
+        print(f"Search list loaded: {len(index['items'])} products")
+        time.sleep(max(0, saved["time"] + INDEX_HOURS * 3600 - time.time()))
+    except (OSError, ValueError, KeyError):
+        pass
+    while True:
+        try:
+            build_index()
+        except Exception as e:
+            print("Search list failed, retrying later:", e)
+        time.sleep(INDEX_HOURS * 3600)
+
+
+def search_products(q):
+    """Products matching every word of q (Russian, English or Armenian): name, colour or category."""
+    q = " ".join(q.lower().split())
+    all_cats = [(n["link"].rstrip("/").split("/")[-1],
+                 [n["title"].lower()] + [x.lower() for x in
+                                         CATEGORY_NAMES.get(n["link"].rstrip("/").split("/")[-1], ())])
+                for n in load_menu()]
+
+    def word_matcher(w):
+        terms = {w}
+        for word, stems in SEARCH_WORDS.items():
+            if w == word or w.rstrip("s") == word.rstrip("s") or (len(w) >= 4 and word.startswith(w)):
+                terms.update(stems)
+        cats = {slug for slug, names in all_cats
+                if any(w == x or (len(w) >= 4 and (w in x or x.startswith(w))) for x in names)}
+        return lambda p: (any(term in p["name"].lower() or term == p["color"] for term in terms)
+                          or bool(p["cats"] & cats))
+
+    # two-word phrases first ("bow tie", "gift card"), then single words
+    words = q.split()
+    for phrase in [w for w in SEARCH_WORDS if " " in w and w in q]:
+        q = q.replace(phrase, phrase.replace(" ", "_"))
+    words = [w.replace("_", " ") for w in q.split()]
+    matchers = [word_matcher(w) for w in words]
+    return [p for p in index["items"] if all(m(p) for m in matchers)][:60]
+
+
+def ask_search(chat_id, lang):
+    post(chat_id, "sendMessage", {
+        "text": SEARCH["prompt"][lang],
+        "reply_markup": {"inline_keyboard": [[{"text": t("back", lang), "callback_data": "menu"}]]}})
+
+
+def run_search(chat_id, lang, q):
+    clear_page(chat_id)
+    retry = [[{"text": SEARCH["again"][lang], "callback_data": "find"},
+              {"text": MENU_BUTTONS["catalog"][lang], "callback_data": "men"}],
+             [{"text": t("menu", lang), "callback_data": "menu"}]]
+    if not index["items"]:
+        post(chat_id, "sendMessage", {"text": SEARCH["wait"][lang], "reply_markup": {"inline_keyboard": retry}})
+        return
+    items = search_products(q)
+    print(f"Search: {len(items)} results")
+    if not items:
+        post(chat_id, "sendMessage", {"text": SEARCH["none"][lang].format(q=q[:40]),
+                                      "reply_markup": {"inline_keyboard": retry}})
+        return
+    searches[chat_id] = {"q": q[:40], "items": items}
+    send_products(chat_id, "s", 0, lang)
+
+
+# ---------- live promotions ----------
+
+def load_promos():
+    """Current offers from henderson.am/offers/: [(slug, Russian title, valid-until date)]."""
+    page = fetch(SITE + "/offers/")
+    promos, seen = [], set()
+    for link, inner in re.findall(r'<a[^>]+href="/offers/([^"/]+)/?"[^>]*>(.*?)</a>', page, re.S):
+        text = " ".join(htmllib.unescape(re.sub(r"<[^>]+>", " ", inner)).split())
+        m = re.match(r"Действительна до (\d\d\.\d\d\.\d{4})\s+(.*?)\s*(Подробнее)?$", text)
+        if not m or link in seen:
+            continue
+        day, month, year = m.group(1).split(".")
+        if (int(year), int(month), int(day)) < tuple(time.localtime()[:3]):
+            continue  # already ended
+        seen.add(link)
+        promos.append((link, m.group(2), m.group(1)))
+    return promos
+
+
+def send_promos(chat_id, lang):
+    try:
+        promos = load_promos()
+    except Exception as e:
+        print("Promotions page unavailable:", e)
+        promos = []
+    if not promos:  # site changed or unreachable: use the saved text
+        send_info(chat_id, "promo", lang)
+        return
+    lines = [f"<b>{PROMO['title'][lang]}</b>", ""]
+    for slug, title_ru, until in promos:
+        names = PROMO_NAMES.get(slug)
+        name = title_ru if lang == "ru" or not names else names[0 if lang == "en" else 1]
+        lines += [f"🏷 {htmllib.escape(name)}", f"📅 {PROMO['until'][lang]} {until}", ""]
+    lines.append(PROMO["note"][lang])
+    post(chat_id, "sendMessage", {
+        "text": "\n".join(lines), "parse_mode": "HTML",
+        "reply_markup": {"inline_keyboard": [[{"text": t("back", lang), "callback_data": "menu"}]]}})
+
+
 # ---------- screens ----------
 
 welcome = {"file_id": None}
@@ -352,7 +501,7 @@ def send_menu(chat_id, lang):
     def b(key, data):
         return {"text": MENU_BUTTONS[key][lang], "callback_data": data}
     send_logo(chat_id, t("welcome", lang), [
-        [b("catalog", "men")],
+        [b("catalog", "men"), b("search", "find")],
         [b("sizes", "i:sizes"), b("tailor", "i:tailor")],
         [b("mtm", "i:mtm"), b("stores", "i:stores")],
         [b("delivery", "i:delivery"), b("promo", "i:promo")],
@@ -399,17 +548,30 @@ def send_category(chat_id, node_id, lang):
                                   "parse_mode": "Markdown", "reply_markup": {"inline_keyboard": rows}})
 
 
-def send_products(chat_id, node_id, index, lang, card=None):
+def items_of(chat_id, key):
+    """Products behind a product card: a category (key = node id) or the last search (key = "s")."""
+    if key == "s":
+        return searches.get(chat_id, {}).get("items", [])
+    return load_products(load_menu()[int(key)]["link"])
+
+
+def send_products(chat_id, key, index, lang, card=None):
     """Show one product with < > buttons. card = the product message to update in place."""
-    node = load_menu()[node_id]
-    items = load_products(node["link"])
-    # "Back" from an "All" page goes to the category itself, otherwise to its group or parent
-    back = f"c:{node_id}" if node["children"] else back_from(node_id)
+    items = items_of(chat_id, key)
+    if key == "s":
+        title = f"🔍 {htmllib.escape(searches.get(chat_id, {}).get('q', ''))}"
+        back = "find"
+    else:
+        node_id = int(key)
+        title = htmllib.escape(node_name(node_id, lang))
+        # "Back" from an "All" page goes to the category itself, otherwise to its group or parent
+        back = f"c:{node_id}" if load_menu()[node_id]["children"] else back_from(node_id)
     nav = [{"text": t("back", lang), "callback_data": back},
            {"text": t("menu", lang), "callback_data": "menu"}]
     if not items:
+        clear_page(chat_id, card)
         post(chat_id, "sendMessage", {
-            "text": f"*{node_name(node_id, lang)}*\n\n{t('no_products', lang)}", "parse_mode": "Markdown",
+            "text": f"<b>{title}</b>\n\n{t('no_products', lang)}", "parse_mode": "HTML",
             "reply_markup": {"inline_keyboard": [nav]}})
         return
 
@@ -420,10 +582,10 @@ def send_products(chat_id, node_id, index, lang, card=None):
                + (f"🎨 {htmllib.escape(item['color'])}\n" if item["color"] else "")
                + "💰 " + item["price"] + (f"  <i>{extra}</i>" if extra else ""))
     buttons = {"inline_keyboard": [
-        [{"text": "<", "callback_data": f"p:{node_id}:{index - 1}"},
-         {"text": f"{index + 1} / {len(items)} 📋", "callback_data": f"l:{node_id}:{index}"},
-         {"text": ">", "callback_data": f"p:{node_id}:{index + 1}"}],
-        [{"text": o("order_btn", lang), "callback_data": f"o:{node_id}:{index}"},
+        [{"text": "<", "callback_data": f"p:{key}:{index - 1}"},
+         {"text": f"{index + 1} / {len(items)} 📋", "callback_data": f"l:{key}:{index}"},
+         {"text": ">", "callback_data": f"p:{key}:{index + 1}"}],
+        [{"text": o("order_btn", lang), "callback_data": f"o:{key}:{index}"},
          {"text": o("call_btn", lang), "callback_data": "call:p"}],
         nav,
     ]}
@@ -442,17 +604,17 @@ def send_products(chat_id, node_id, index, lang, card=None):
     post(chat_id, "sendMessage", params)
 
 
-def send_list(chat_id, node_id, current, card, lang):
+def send_list(chat_id, key, current, card, lang):
     """Turn the product card's buttons into a numbered list of all products."""
-    items = load_products(load_menu()[node_id]["link"])
+    items = items_of(chat_id, key)
     rows = []
     for i, item in enumerate(items):
         name = item["name"] if len(item["name"]) <= 24 else item["name"][:23] + "…"
         if item["color"]:
             name += f" ({item['color']})"
         mark = "👉 " if i == current else ""
-        rows.append([{"text": f"{mark}{i + 1}. {name}", "callback_data": f"p:{node_id}:{i}"}])
-    rows.append([{"text": t("close", lang), "callback_data": f"p:{node_id}:{current}"}])
+        rows.append([{"text": f"{mark}{i + 1}. {name}", "callback_data": f"p:{key}:{i}"}])
+    rows.append([{"text": t("close", lang), "callback_data": f"p:{key}:{current}"}])
     call("editMessageReplyMarkup", {"chat_id": chat_id, "message_id": card,
                                     "reply_markup": {"inline_keyboard": rows}})
 
@@ -466,26 +628,132 @@ def o(key, lang):
     return ORDER[key].get(lang) or ORDER[key]["en"]
 
 
-def load_admin():
+def load_admin_data():
+    """{"admins": [{"id", "name"}], "invite": {"code", "expires"}}"""
     try:
         with open(ADMIN_FILE) as f:
-            return json.load(f).get("chat_id")
+            data = json.load(f)
     except (OSError, ValueError):
-        # On the server the admin chat can also be set with the ADMIN_CHAT_ID variable
-        admin = os.environ.get("ADMIN_CHAT_ID", "")
-        return int(admin) if admin.lstrip("-").isdigit() else None
+        data = {}
+    if "chat_id" in data:  # older format: one admin
+        data = {"admins": [{"id": data["chat_id"], "name": ""}]}
+    if "admins" not in data:
+        # On the server the first admin can also come from the ADMIN_CHAT_ID variable
+        env = os.environ.get("ADMIN_CHAT_ID", "")
+        data["admins"] = [{"id": int(env), "name": ""}] if env.lstrip("-").isdigit() else []
+    return data
 
 
-def set_admin(chat_id, lang):
-    """/admin: the first chat to send it receives all requests."""
-    admin = load_admin()
-    if admin and admin != chat_id:
-        post(chat_id, "sendMessage", {"text": o("admin_taken", lang)})
-        return
+def save_admin_data(data):
     with open(ADMIN_FILE, "w") as f:
-        json.dump({"chat_id": chat_id}, f)
-    print("Admin chat saved")
+        json.dump(data, f)
+
+
+def load_admins():
+    return [a["id"] for a in load_admin_data()["admins"]]
+
+
+def user_name(user):
+    name = " ".join(filter(None, [user.get("first_name"), user.get("last_name")])) or "?"
+    return name + (f" (@{user['username']})" if user.get("username") else "")
+
+
+def add_admin(chat_id, user, lang):
+    data = load_admin_data()
+    if chat_id not in [a["id"] for a in data["admins"]]:
+        data["admins"].append({"id": chat_id, "name": user_name(user)})
+    data.pop("invite", None)
+    save_admin_data(data)
+    print("Admin added")
     post(chat_id, "sendMessage", {"text": o("admin_set", lang)})
+    for a in data["admins"]:  # tell the other admins
+        if a["id"] != chat_id:
+            al = lang_of(a["id"]) or "en"
+            call("sendMessage", {"chat_id": a["id"], "text": ADMIN["joined"][al].format(name=user_name(user))})
+
+
+def admin_command(chat_id, user, lang):
+    """/admin: first person becomes admin; an admin gets the admin panel."""
+    data = load_admin_data()
+    ids = [a["id"] for a in data["admins"]]
+    if not ids:
+        add_admin(chat_id, user, lang)
+    elif chat_id in ids:
+        send_admin_panel(chat_id, lang)
+    else:
+        post(chat_id, "sendMessage", {"text": o("admin_taken", lang)})
+
+
+def send_admin_panel(chat_id, lang):
+    admins = load_admin_data()["admins"]
+    names = "\n".join(f"• {htmllib.escape(a['name'] or str(a['id']))}" + (" 👈" if a["id"] == chat_id else "")
+                      for a in admins)
+    post(chat_id, "sendMessage", {
+        "text": f"{ADMIN['panel'][lang]}\n{names}", "parse_mode": "HTML",
+        "reply_markup": {"inline_keyboard": [
+            [{"text": ADMIN["invite_btn"][lang], "callback_data": "ai"}],
+            [{"text": ADMIN["leave_btn"][lang], "callback_data": "al"}],
+            [{"text": t("close", lang), "callback_data": "x"}]]}})
+
+
+def make_invite(chat_id, lang):
+    if chat_id not in load_admins():
+        return
+    data = load_admin_data()
+    code = uuid.uuid4().hex[:12]
+    data["invite"] = {"code": code, "expires": time.time() + 24 * 3600}
+    save_admin_data(data)
+    link = f"https://t.me/{BOT['username']}?start=adm_{code}"
+    post(chat_id, "sendMessage", {"text": ADMIN["invite"][lang].format(link=link)})
+
+
+def use_invite(chat_id, user, lang, code):
+    invite = load_admin_data().get("invite") or {}
+    if invite.get("code") == code and invite.get("expires", 0) > time.time():
+        add_admin(chat_id, user, lang)
+    else:
+        post(chat_id, "sendMessage", {"text": ADMIN["bad_invite"][lang]})
+
+
+def leave_admins(chat_id, lang):
+    data = load_admin_data()
+    data["admins"] = [a for a in data["admins"] if a["id"] != chat_id]
+    save_admin_data(data)
+    print("Admin left")
+    post(chat_id, "sendMessage", {"text": ADMIN["left"][lang] + ("" if data["admins"] else "\n\n" + ADMIN["left_last"][lang])})
+
+
+# ---------- reminder before the Railway trial ends ----------
+
+TRIAL_END = os.environ.get("TRIAL_END", "2026-11-13")  # YYYY-MM-DD; empty = no reminders
+REMIND_DAYS = (5, 1)  # remind this many days before
+REMINDER_FILE = os.path.join(DATA_DIR, "reminders.json")
+last_check = {"time": 0}
+
+
+def check_reminders():
+    if not TRIAL_END or time.time() - last_check["time"] < 3600:
+        return
+    last_check["time"] = time.time()
+    try:
+        end = time.mktime(time.strptime(TRIAL_END, "%Y-%m-%d"))
+        with open(REMINDER_FILE) as f:
+            done = json.load(f)
+    except ValueError:
+        return
+    except OSError:
+        done = []
+    days_left = (end - time.time()) / 86400
+    for days in REMIND_DAYS:
+        if str(days) not in done and 0 < days_left <= days:
+            date = time.strftime("%d.%m.%Y", time.localtime(end))
+            for admin in load_admins():
+                call("sendMessage", {"chat_id": admin,
+                                     "text": ADMIN["trial"][lang_of(admin) or "en"].format(date=date)})
+            done.append(str(days))
+            with open(REMINDER_FILE, "w") as f:
+                json.dump(done, f)
+            print(f"Trial reminder sent ({days} days before)")
 
 
 orders = {}  # chat_id -> request being filled in: {"step", "item", "type", "store", "note"}
@@ -501,11 +769,11 @@ def send_call(chat_id, lang, back="menu"):
         "reply_markup": {"inline_keyboard": [[{"text": t("back", lang), "callback_data": back}]]}})
 
 
-def start_order(chat_id, lang, node_id=None, index=None):
+def start_order(chat_id, lang, key=None, index=None):
     """Step 1: what kind of request. From a product card, the product is attached."""
     item = None
-    if node_id is not None:
-        items = load_products(load_menu()[node_id]["link"])
+    if key is not None:
+        items = items_of(chat_id, key)
         item = items[index % len(items)] if items else None
     orders[chat_id] = {"step": "type", "item": item}
     kinds = ["t_order", "t_reserve"] if item else ["t_order", "t_reserve", "t_fitting", "t_mtm", "t_other"]
@@ -542,14 +810,11 @@ def ask_phone(chat_id, lang, note):
 def finish_order(chat_id, lang, phone, user):
     """Send the request to the admin chat and thank the customer."""
     order = orders.pop(chat_id)
-    admin = load_admin()
     sent = False
-    if admin:
+    for admin in load_admins():
         al = lang_of(admin) or "en"
         item = order["item"]
-        name = " ".join(filter(None, [user.get("first_name"), user.get("last_name")]))
-        if user.get("username"):
-            name += f" (@{user['username']})"
+        name = user_name(user)
         lines = [f"<b>{o('new_request', al)}</b>",
                  f"{o('f_type', al)}: {o(order['type'], al)}"]
         if item:
@@ -563,14 +828,16 @@ def finish_order(chat_id, lang, phone, user):
                   f"{o('f_client', al)}: {htmllib.escape(name)}",
                   f"{o('f_phone', al)}: {htmllib.escape(phone)}"]
         text = "\n".join(lines)
+        ok = False
         if item and item["photo"]:
-            sent = bool(call("sendPhoto", {"chat_id": admin, "photo": item["photo"],
-                                           "caption": text, "parse_mode": "HTML"}))
-        if not sent:
-            sent = bool(call("sendMessage", {"chat_id": admin, "text": text, "parse_mode": "HTML"}))
-        print("Order: request sent to admin" if sent else "Order: sending to admin FAILED")
-    else:
-        print("No admin chat yet: send /admin to the bot to receive requests")
+            ok = bool(call("sendPhoto", {"chat_id": admin, "photo": item["photo"],
+                                         "caption": text, "parse_mode": "HTML"}))
+        if not ok:
+            ok = bool(call("sendMessage", {"chat_id": admin, "text": text, "parse_mode": "HTML"}))
+        print("Order: request sent to an admin" if ok else "Order: sending to an admin FAILED")
+        sent = sent or ok
+    if not load_admins():
+        print("No admin yet: send /admin to the bot to receive requests")
 
     # Confirmation also removes the phone keyboard
     post(chat_id, "sendMessage", {"text": o("sent", lang) if sent else o("not_sent", lang),
@@ -615,12 +882,20 @@ def handle(update):
         msg = update["message"]
         chat_id = msg["chat"]["id"]
         lang = lang_of(chat_id)
-        if msg.get("text", "").startswith("/admin"):
-            set_admin(chat_id, lang or "en")
+        text = msg.get("text", "")
+        if text.startswith("/admin"):
+            admin_command(chat_id, msg.get("from", {}), lang or "en")
+            return
+        if text.startswith("/start adm_"):
+            use_invite(chat_id, msg.get("from", {}), lang or "en", text.split("adm_", 1)[1].strip())
             return
         if lang and handle_order_message(chat_id, lang, msg):
             return
         orders.pop(chat_id, None)
+        text = msg.get("text", "").strip()
+        if lang and text and not text.startswith("/"):
+            run_search(chat_id, lang, text)
+            return
         clear_page(chat_id)
         send_menu(chat_id, lang) if lang else send_languages(chat_id)
     elif "callback_query" in update:
@@ -647,8 +922,8 @@ def handle(update):
                     clear_page(chat_id, message_id)
                     start_order(chat_id, lang)
                 else:
-                    _, node_id, index = data.split(":")
-                    start_order(chat_id, lang, int(node_id), int(index))
+                    _, key, index = data.split(":")
+                    start_order(chat_id, lang, key, int(index))
                 return
             if data.startswith(("ot:", "os:")) and chat_id in orders:
                 call("deleteMessage", {"chat_id": chat_id, "message_id": message_id})
@@ -672,15 +947,20 @@ def handle(update):
             if data == "x":
                 call("deleteMessage", {"chat_id": chat_id, "message_id": message_id})
                 return
+            if data in ("ai", "al"):  # admin panel buttons
+                call("deleteMessage", {"chat_id": chat_id, "message_id": message_id})
+                if chat_id in load_admins():
+                    make_invite(chat_id, lang) if data == "ai" else leave_admins(chat_id, lang)
+                return
             # Middle button: show the list of products on the same message
             if data.startswith("l:"):
-                _, node_id, index = data.split(":")
-                send_list(chat_id, int(node_id), int(index), message_id, lang)
+                _, key, index = data.split(":")
+                send_list(chat_id, key, int(index), message_id, lang)
                 return
             # < and > on a product card update that same message
             if data.startswith("p:") and "photo" in q["message"]:
-                _, node_id, index = data.split(":")
-                send_products(chat_id, int(node_id), int(index), lang, card=message_id)
+                _, key, index = data.split(":")
+                send_products(chat_id, key, int(index), lang, card=message_id)
                 return
             # New page: remove everything from the last one
             clear_page(chat_id, message_id)
@@ -690,8 +970,12 @@ def handle(update):
                 send_languages(chat_id)
             elif data == "call":
                 send_call(chat_id, lang)
+            elif data == "i:promo":
+                send_promos(chat_id, lang)
             elif data.startswith("i:") and data[2:] in INFO:
                 send_info(chat_id, data[2:], lang)
+            elif data == "find":
+                ask_search(chat_id, lang)
             elif data == "men":
                 send_men(chat_id, lang)
             elif data.startswith("g:"):
@@ -699,8 +983,8 @@ def handle(update):
             elif data.startswith("c:"):
                 send_category(chat_id, int(data[2:]), lang)
             elif data.startswith("p:"):
-                _, node_id, index = data.split(":")
-                send_products(chat_id, int(node_id), int(index), lang)
+                _, key, index = data.split(":")
+                send_products(chat_id, key, int(index), lang)
         except Exception as e:
             print("Error:", e)
             post(chat_id, "sendMessage", {
@@ -719,10 +1003,13 @@ def main():
     if not me:
         print("Could not connect. Check BOT_TOKEN in .env")
         return
+    BOT["username"] = me["username"]
     print(f"Bot @{me['username']} is running. Press Ctrl+C to stop.")
+    threading.Thread(target=index_loop, daemon=True).start()  # search list, built in the background
     offset = 0
     while True:
         try:
+            check_reminders()
             updates = call("getUpdates", {"offset": offset, "timeout": 30}, timeout=40) or []
             for update in updates:
                 offset = update["update_id"] + 1

@@ -7,3 +7,6 @@ certs.pem
 __pycache__/
 *.pyc
 .DS_Store
+search-index.json
+reminders.json
+HANDOFF.md

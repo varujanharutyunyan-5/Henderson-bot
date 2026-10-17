@@ -27,7 +27,7 @@ LANG_BUTTONS = {"en": "🇬🇧 English", "ru": "🇷🇺 Русский", "hy":
 GROUP_ICONS = {
     "Suits": "🤵", "Winter clothes": "🧥", "Shirts & polos": "👔", "Trousers & jeans": "👖",
     "Sportswear": "🏃", "Shoes": "👞", "Bags": "💼", "Accessories": "🎩",
-    "Home & underwear": "🏠", "Other": "🧺",
+    "Home & underwear": "🏠", "Gifts": "🎁", "Unisex": "👜", "Other": "🧺",
 }
 
 # Big sections (keys are the names used in GROUPS in bot.py)
@@ -41,6 +41,8 @@ GROUP_NAMES = {
     "Bags":             {"ru": "Сумки", "hy": "Պայուսակներ"},
     "Accessories":      {"ru": "Аксессуары", "hy": "Աքսեսուարներ"},
     "Home & underwear": {"ru": "Дом и бельё", "hy": "Տնային հագուստ և ներքնազգեստ"},
+    "Gifts":            {"ru": "Подарки", "hy": "Նվերներ"},
+    "Unisex":           {"ru": "Унисекс", "hy": "Ունիսեքս"},
     "Other":            {"ru": "Другое", "hy": "Այլ"},
 }
 
@@ -180,7 +182,8 @@ MENU_BUTTONS = {
     "mtm":      {"en": "🧵 Made-to-measure", "ru": "🧵 Пошив на заказ", "hy": "🧵 Անհատական կարում"},
     "stores":   {"en": "📍 Stores & contacts", "ru": "📍 Магазины и контакты", "hy": "📍 Խանութներ և կապ"},
     "delivery": {"en": "🚚 Delivery & returns", "ru": "🚚 Доставка и возврат", "hy": "🚚 Առաքում և վերադարձ"},
-    "promo":    {"en": "🎁 Promotions", "ru": "🎁 Акции", "hy": "🎁 Ակցիաներ"},
+    "promo":    {"en": "🏷 Promotions", "ru": "🏷 Акции", "hy": "🏷 Ակցիաներ"},
+    "search":   {"en": "🔍 Search", "ru": "🔍 Поиск", "hy": "🔍 Որոնում"},
 }
 
 # Size table is the same in every language (HTML <pre> = monospace)
@@ -386,10 +389,9 @@ ORDER = {
     "admin_set":   {"en": "✅ Done. Order and reservation requests will come to this chat.",
                     "ru": "✅ Готово. Заявки на заказ и бронь будут приходить в этот чат.",
                     "hy": "✅ Պատրաստ է։ Պատվերի և ամրագրման հայտերը կգան այս չաթ։"},
-    "admin_taken": {"en": "⛔️ Requests already go to another chat. To change it, "
-                          "delete admin.json on the computer.",
-                    "ru": "⛔️ Заявки уже приходят в другой чат. Удалите файл admin.json на компьютере, чтобы сменить.",
-                    "hy": "⛔️ Հայտերն արդեն գնում են այլ չաթ։ Փոխելու համար ջնջեք admin.json ֆայլը համակարգչում։"},
+    "admin_taken": {"en": "⛔️ Only an admin can add new admins. Ask an admin to send you an invite link.",
+                    "ru": "⛔️ Добавлять админов может только админ. Попросите админа прислать вам ссылку-приглашение.",
+                    "hy": "⛔️ Նոր ադմիններ կարող է ավելացնել միայն ադմինը։ Խնդրեք ադմինին ուղարկել հրավերի հղում։"},
     "new_request": {"en": "📩 New request", "ru": "📩 Новая заявка", "hy": "📩 Նոր հայտ"},
     "f_type":      {"en": "Type", "ru": "Тип", "hy": "Տեսակ"},
     "f_item":      {"en": "Item", "ru": "Товар", "hy": "Ապրանք"},
@@ -398,4 +400,100 @@ ORDER = {
     "f_store":     {"en": "Store", "ru": "Салон", "hy": "Խանութ"},
     "f_client":    {"en": "Customer", "ru": "Клиент", "hy": "Հաճախորդ"},
     "f_phone":     {"en": "Phone", "ru": "Телефон", "hy": "Հեռախոս"},
+}
+
+
+# ---------- search ----------
+
+SEARCH = {
+    "prompt":  {"en": "🔍 Type what you're looking for.\nFor example: coat, jeans, belt, պայուսակ, пальто",
+                "ru": "🔍 Напишите, что вы ищете.\nНапример: пальто, джинсы, ремень, coat, պայուսակ",
+                "hy": "🔍 Գրեք, թե ինչ եք փնտրում։\nՕրինակ՝ վերարկու, ջինս, գոտի, coat, пальто"},
+    "none":    {"en": "😔 Nothing found for “{q}”.\nTry another word or open the catalog.",
+                "ru": "😔 По запросу «{q}» ничего не найдено.\nПопробуйте другое слово или откройте каталог.",
+                "hy": "😔 «{q}» հարցմամբ ոչինչ չի գտնվել։\nՓորձեք այլ բառ կամ բացեք կատալոգը։"},
+    "wait":    {"en": "⏳ Search is getting ready (a few minutes after a restart). Try again soon, or use the catalog.",
+                "ru": "⏳ Поиск готовится (несколько минут после перезапуска). Попробуйте чуть позже или откройте каталог.",
+                "hy": "⏳ Որոնումը պատրաստվում է (վերագործարկումից մի քանի րոպե անց)։ Փորձեք քիչ անց կամ բացեք կատալոգը։"},
+    "again":   {"en": "🔍 New search", "ru": "🔍 Новый поиск", "hy": "🔍 Նոր որոնում"},
+}
+
+# English and Armenian words -> Russian word starts used in product names on the site
+SEARCH_WORDS = {
+    "coat": ["пальто", "плащ"], "raincoat": ["плащ"], "jacket": ["куртк", "пиджак"], "blazer": ["пиджак"],
+    "parka": ["парк"], "down": ["пухов"], "shirt": ["рубаш"], "suit": ["костюм"], "tuxedo": ["смокинг"],
+    "trousers": ["брюк"], "pants": ["брюк"], "chinos": ["чинос"], "jeans": ["джинс"], "shorts": ["шорт"],
+    "t-shirt": ["футболк"], "tshirt": ["футболк"], "polo": ["поло"], "sweater": ["свитер", "пуловер", "джемпер"],
+    "pullover": ["пуловер"], "jumper": ["джемпер"], "cardigan": ["кардиган"], "hoodie": ["толстовк", "худи"],
+    "sweatshirt": ["толстовк", "свитшот"], "turtleneck": ["водолазк"], "vest": ["жилет"],
+    "shoes": ["туфл", "обув"], "sneakers": ["кроссов", "кед", "сникер"], "trainers": ["кроссов"],
+    "boots": ["ботин"], "loafers": ["лофер"], "sandals": ["сандал"], "slippers": ["тапоч", "шлепан"],
+    "belt": ["ремен", "ремн"], "tie": ["галстук"], "bow tie": ["бабочк"], "socks": ["носк"],
+    "underwear": ["трус", "боксер", "белье", "бельё"], "boxers": ["боксер"], "pyjamas": ["пижам"],
+    "pajamas": ["пижам"], "bag": ["сумк", "портфел", "рюкзак"], "backpack": ["рюкзак"],
+    "briefcase": ["портфел"], "suitcase": ["чемодан"], "wallet": ["кошел", "портмоне"],
+    "scarf": ["шарф"], "gloves": ["перчат"], "hat": ["шапк", "кепк", "бейсболк", "панам"], "cap": ["кепк", "бейсболк"],
+    "beanie": ["шапк"], "glasses": ["очк"], "sunglasses": ["очк"], "umbrella": ["зонт"],
+    "perfume": ["парфюм", "туалетн", "вода"], "fragrance": ["парфюм", "туалетн"], "cufflinks": ["запонк"],
+    "bracelet": ["браслет"], "gift card": ["подарочн"],
+    "վերարկու": ["пальто"], "անձրևանոց": ["плащ", "зонт"], "բաճկոն": ["куртк"], "պիջակ": ["пиджак"],
+    "վերնաշապիկ": ["рубаш"], "կոստյում": ["костюм"], "տաբատ": ["брюк"], "ջինս": ["джинс"], "շորտ": ["шорт"],
+    "շապիկ": ["футболк"], "պոլո": ["поло"], "սվիտեր": ["свитер", "пуловер", "джемпер"], "ժիլետ": ["жилет"],
+    "կոշիկ": ["туфл", "обув", "ботин"], "կրոսովկա": ["кроссов"], "գոտի": ["ремен", "ремн"],
+    "փողկապ": ["галстук"], "գուլպա": ["носк"], "պայուսակ": ["сумк", "портфел"], "ուսապարկ": ["рюкзак"],
+    "ճամպրուկ": ["чемодан"], "դրամապանակ": ["кошел", "портмоне"], "շարֆ": ["шарф"], "ձեռնոց": ["перчат"],
+    "գլխարկ": ["шапк", "кепк"], "ակնոց": ["очк"], "օծանելիք": ["парфюм", "туалетн"], "պիժամա": ["пижам"],
+    "black": ["black"], "white": ["white"], "navy": ["navy"], "blue": ["blue", "navy"], "grey": ["grey"],
+    "gray": ["grey"], "brown": ["brown"], "beige": ["beige"], "green": ["green", "olive"],
+}
+
+# ---------- live promotions ----------
+
+PROMO = {
+    "title": {"en": "🏷 Promotions", "ru": "🏷 Акции", "hy": "🏷 Ակցիաներ"},
+    "until": {"en": "until", "ru": "до", "hy": "մինչև"},
+    "note":  {"en": "Details in store.", "ru": "Подробности в салоне.", "hy": "Մանրամասները՝ խանութում։"},
+}
+
+# Known offers (by link on henderson.am/offers/) -> (English, Armenian). New offers show the site's Russian title.
+PROMO_NAMES = {
+    "discount-3pcs": ("Up to 25% off when you buy 3 or more items", "Մինչև 25% զեղչ՝ 3 և ավելի ապրանք գնելիս"),
+    "welcome-coupon-am": ("7 000 ֏ gift for registering", "7 000 ֏ նվեր գրանցվելու համար"),
+    "discount-socks-am": ("Up to 20% off when you buy 3+ pairs of socks",
+                          "Մինչև 20% զեղչ՝ 3 և ավելի զույգ գուլպա գնելիս"),
+    "garment-bag-sp": ("Oxford garment bag for 100 ֏", "Oxford պատյան՝ 100 ֏"),
+}
+
+# ---------- admins and reminders ----------
+
+ADMIN = {
+    "panel":      {"en": "👥 <b>Admins</b> – they receive all order and reservation requests:",
+                   "ru": "👥 <b>Админы</b> – получают все заявки на заказ и бронь:",
+                   "hy": "👥 <b>Ադմիններ</b> – ստանում են պատվերի և ամրագրման բոլոր հայտերը."},
+    "invite_btn": {"en": "➕ Invite admin", "ru": "➕ Пригласить админа", "hy": "➕ Հրավիրել ադմին"},
+    "leave_btn":  {"en": "🚪 Stop being admin", "ru": "🚪 Перестать быть админом", "hy": "🚪 Դադարել ադմին լինել"},
+    "invite":     {"en": "➕ Send this link to the new admin. It works once, for 24 hours:\n{link}\n\n"
+                         "To hand over: after they join, tap 🚪 Stop being admin.",
+                   "ru": "➕ Отправьте эту ссылку новому админу. Она работает один раз, 24 часа:\n{link}\n\n"
+                         "Чтобы передать права: после того как он присоединится, нажмите 🚪 Перестать быть админом.",
+                   "hy": "➕ Ուղարկեք այս հղումը նոր ադմինին։ Այն գործում է մեկ անգամ, 24 ժամ.\n{link}\n\n"
+                         "Իրավունքները փոխանցելու համար՝ նրա միանալուց հետո սեղմեք 🚪 Դադարել ադմին լինել։"},
+    "bad_invite": {"en": "⛔️ This invite link is used or expired. Ask an admin for a new one.",
+                   "ru": "⛔️ Ссылка уже использована или устарела. Попросите у админа новую.",
+                   "hy": "⛔️ Հղումն արդեն օգտագործված է կամ ժամկետանց։ Խնդրեք ադմինից նորը։"},
+    "joined":     {"en": "👥 {name} is now an admin and will receive requests.",
+                   "ru": "👥 {name} теперь админ и будет получать заявки.",
+                   "hy": "👥 {name}-ն այժմ ադմին է և կստանա հայտերը։"},
+    "left":       {"en": "🚪 You're no longer an admin. Requests won't come to you.",
+                   "ru": "🚪 Вы больше не админ. Заявки к вам приходить не будут.",
+                   "hy": "🚪 Դուք այլևս ադմին չեք։ Հայտերը ձեզ չեն գա։"},
+    "left_last":  {"en": "⚠️ There are no admins now. The next person to send /admin becomes admin.",
+                   "ru": "⚠️ Сейчас нет ни одного админа. Следующий, кто отправит /admin, станет админом.",
+                   "hy": "⚠️ Այժմ ոչ մի ադմին չկա։ Հաջորդը, ով կուղարկի /admin, կդառնա ադմին։"},
+    "trial":      {"en": "⏰ Reminder: the Railway trial for this bot ends on {date}.\n"
+                         "Open railway.com → Upgrade, otherwise the bot will stop.",
+                   "ru": "⏰ Напоминание: пробный период Railway для бота заканчивается {date}.\n"
+                         "Откройте railway.com → Upgrade, иначе бот остановится.",
+                   "hy": "⏰ Հիշեցում. բոտի Railway փորձաշրջանն ավարտվում է {date}։\n"
+                         "Բացեք railway.com → Upgrade, այլապես բոտը կդադարի աշխատել։"},
 }
