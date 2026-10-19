@@ -25,14 +25,14 @@ UI = {
 LANG_BUTTONS = {"en": "🇬🇧 English", "ru": "🇷🇺 Русский", "hy": "🇦🇲 Հայերեն"}
 
 GROUP_ICONS = {
-    "Suits": "🤵", "Winter clothes": "🧥", "Shirts & polos": "👔", "Trousers & jeans": "👖",
+    "Suits & formal wear": "🤵", "Winter clothes": "🧥", "Shirts & polos": "👔", "Trousers & jeans": "👖",
     "Sportswear": "🏃", "Shoes": "👞", "Bags": "💼", "Accessories": "🎩",
     "Home & underwear": "🏠", "Gifts": "🎁", "Unisex": "👜", "Other": "🧺",
 }
 
 # Big sections (keys are the names used in GROUPS in bot.py)
 GROUP_NAMES = {
-    "Suits":            {"ru": "Костюмы", "hy": "Կոստյումներ"},
+    "Suits & formal wear": {"ru": "Костюмы и классика", "hy": "Կոստյումներ և դասական հագուստ"},
     "Winter clothes":   {"ru": "Зимняя одежда", "hy": "Ձմեռային հագուստ"},
     "Shirts & polos":   {"ru": "Рубашки и поло", "hy": "Վերնաշապիկներ և պոլոներ"},
     "Trousers & jeans": {"ru": "Брюки и джинсы", "hy": "Տաբատներ և ջինսեր"},

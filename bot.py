@@ -195,7 +195,7 @@ def load_products(link):
 # Each group lists site categories by their link. "+link" means "all subcategories of link".
 # Site categories not listed anywhere go to "Other" automatically.
 GROUPS = [
-    ("Suits", ["/catalog/suit-separates", "/catalog/blazers", "/catalog/vests",
+    ("Suits & formal wear", ["/catalog/suit-separates", "/catalog/blazers", "/catalog/vests",
                  "/catalog/formal-trousers", "/catalog/ties", "/catalog/bow-ties",
                  "/catalog/cuff-links-tie-clips"]),
     ("Winter clothes", ["/catalog/outerwear", "/catalog/knitwear", "/catalog/thermal-underwear",
