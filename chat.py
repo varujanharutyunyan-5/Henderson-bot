@@ -371,14 +371,14 @@ root.innerHTML = '<style>%(css)s</style>' +
  '<select aria-label="Language"><option value="en">EN</option><option value="ru">RU</option><option value="hy">HY</option></select>' +
  '<button class="x">' + svg('<path d="M6 6l12 12M18 6 6 18"/>') + '</button></header>' +
  '<div class="log" aria-live="polite"></div><div class="btns"></div>' +
- '<form><input maxlength="500" autocomplete="off"><button class="go">' + svg('<path d="M4 12h15M13 6l6 6-6 6"/>') + '</button></form>' +
+ '<form><input maxlength="500" autocomplete="off"><button class="go"></button></form>' +
  '<footer><a target="_blank" rel="noopener"></a></footer></section>';
 var $ = function(s){ return root.querySelector(s); };
 var panel = $('.panel'), log = $('.log'), btns = $('.btns'), input = $('input'), sel = $('select');
 sel.value = lang;
 function texts(){ var L = T[lang]; $('.fab span').textContent = L.open; $('.fab').setAttribute('aria-label', L.open);
   $('.ttl strong').textContent = 'HENDERSON'; panel.setAttribute('aria-label', L.title);
-  input.placeholder = L.placeholder; $('.go').setAttribute('aria-label', L.send); $('.x').setAttribute('aria-label', L.close);
+  input.placeholder = L.placeholder; $('.go').textContent = L.send; $('.x').setAttribute('aria-label', L.close);
   $('footer a').textContent = L.privacy; $('footer a').href = API.replace(/\/chat$/, '/privacy?lang=' + lang); }
 texts();
 var mark = null;
@@ -464,7 +464,7 @@ WIDGET_CSS = (  # Henderson look: navy on white, near-square corners, letter-spa
     "form{display:flex;gap:8px;padding:10px 12px;border-top:1px solid #c9c4ba;background:#fff}"
     "form input{flex:1;min-width:0;border:1px solid #a9a397;border-radius:2px;padding:10px 12px;background:#fff}"
     "form input:focus{outline:none;border-color:#15284B;box-shadow:0 0 0 1px #15284B}form input::placeholder{color:#6b6f76}"
-    ".go{background:#15284B;color:#fff;border:0;border-radius:2px;width:42px;display:flex;align-items:center;justify-content:center}"
+    ".go{background:#15284B;color:#fff;border:0;border-radius:2px;padding:0 16px;font-size:11.5px;font-weight:600;text-transform:uppercase;letter-spacing:.12em}.go:hover{background:#0e1c36}.go:disabled{opacity:.6}"
     "footer{padding:0 12px 8px;background:#fff;font-size:11px;text-align:right}footer a{color:#4f535a}"
     ":focus-visible{outline:2px solid #3d5a99;outline-offset:2px}"
     "@media (max-width:480px){.panel{height:calc(100vh - 32px)}}"
