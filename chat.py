@@ -242,6 +242,9 @@ def send_request(a, s):
     item = s["seen"].get(a["product_id"]) or (find_item(a["product_id"]) if a["product_id"] else None)
     if sum(ch.isdigit() for ch in a["phone"]) < 6:
         return False
+    key = (kind, store, a["product_id"], a["size"].strip(), re.sub(r"\D", "", a["phone"]))
+    if key in s.setdefault("sent_keys", set()):
+        return True  # already sent in this chat
     sent = False
     for admin in B.load_admins():
         al = B.lang_of(admin) or "en"
@@ -266,24 +269,39 @@ def send_request(a, s):
             "chat_id": admin, "photo": item["photo"], "caption": text, "parse_mode": "HTML"}))
         sent = sent or ok or bool(B.call("sendMessage", {"chat_id": admin, "text": text, "parse_mode": "HTML"}))
     print("Chat: request sent" if sent else "Chat: request NOT sent")
+    if sent:
+        s["sent_keys"].add(key)
     return sent
 
 
+def call_model(s, **extra):
+    return client.beta.messages.create(
+        model=MODEL, max_tokens=8000, system=SYSTEM, tools=TOOLS, messages=s["messages"],
+        output_config={"effort": "low"},          # short shop chats don't need deep thinking
+        cache_control={"type": "ephemeral"},       # caches tools + system + earlier turns
+        betas=["server-side-fallback-2026-07-01"], fallbacks="default", **extra)
+
+
+def tool_result(block, s):
+    """Run one tool call; a failure (e.g. henderson.am timing out) goes back to the model as an error."""
+    try:
+        return {"type": "tool_result", "tool_use_id": block.id,
+                "content": json.dumps(run_tool(block.name, block.input, s), ensure_ascii=False)}
+    except Exception as e:
+        print("Chat tool error:", block.name, type(e).__name__, e)
+        return {"type": "tool_result", "tool_use_id": block.id, "is_error": True,
+                "content": "The shop's site did not respond. Answer without it or suggest calling 8248."}
+
+
 def ask_ai(s, text, lang):
-    """One visitor message → Claude with tools → {"text", "products"}."""
+    """One visitor message → Claude with tools → {"text", "products", "buttons"}."""
     s["messages"].append({"role": "user", "content": f"[page language: {lang}]\n{text}"})
-    for _ in range(8):  # tool-use loop
-        r = client.beta.messages.create(
-            model=MODEL, max_tokens=8000, system=SYSTEM, tools=TOOLS, messages=s["messages"],
-            output_config={"effort": "low"},          # short shop chats don't need deep thinking
-            cache_control={"type": "ephemeral"},       # caches tools + system + earlier turns
-            betas=["server-side-fallback-2026-07-01"], fallbacks="default")
+    for step in range(9):  # tool-use loop; the last round must answer in text
+        r = call_model(s, **({"tool_choice": {"type": "none"}} if step == 8 else {}))
         s["messages"].append({"role": "assistant", "content": r.content})  # append-only history
         if r.stop_reason == "tool_use":
             s["messages"].append({"role": "user", "content": [
-                {"type": "tool_result", "tool_use_id": b.id,
-                 "content": json.dumps(run_tool(b.name, b.input, s), ensure_ascii=False)}
-                for b in r.content if b.type == "tool_use"]})
+                tool_result(b, s) for b in r.content if b.type == "tool_use"]})
             continue
         if r.stop_reason != "pause_turn":
             break
@@ -309,14 +327,21 @@ def chat(body, ip):
     """POST /chat: {"session", "lang", "action"} for buttons or {"session", "lang", "message"} for AI."""
     lang = body.get("lang") if body.get("lang") in LANGS else "en"
     now = time.time()
+    menu = [{"label": t("menu", lang), "action": "menu"}]
     with lock:
         for k in [k for k, v in sessions.items() if now - v["time"] > SESSION_HOURS * 3600]:
             del sessions[k]
+        for k in [k for k, v in hits.items() if not v or now - v[-1] > 3600]:
+            del hits[k]
         sid = body.get("session") if body.get("session") in sessions else secrets.token_urlsafe(16)
         s = sessions.setdefault(sid, {"messages": [], "seen": {}, "time": now, "turns": 0, "busy": False})
         s["time"] = now
     if body.get("action"):
-        return {"session": sid, **do_action(str(body["action"])[:40], lang)}
+        try:
+            return {"session": sid, **do_action(str(body["action"])[:40], lang)}
+        except Exception as e:  # e.g. henderson.am timed out: keep the chat, offer the menu
+            print("Chat button error:", type(e).__name__, e)
+            return {"session": sid, "text": t("error", lang), "buttons": menu}
     text = str(body.get("message", "")).strip()[:500]
     if not text:
         return {"session": sid, "text": ""}
@@ -325,7 +350,7 @@ def chat(body, ip):
     with lock:
         hits[ip] = [x for x in hits.get(ip, []) if now - x < 3600]
         if len(hits[ip]) >= LIMIT_IP_HOUR or s["busy"]:
-            return {"session": sid, "text": t("busy", lang)}
+            return {"session": sid, "text": t("busy", lang), "buttons": menu}
         if s["turns"] >= LIMIT_TURNS:
             return {"session": sid, "text": t("new_chat", lang), "buttons": [{"label": t("restart", lang), "action": "reset"}]}
         hits[ip].append(now)
@@ -337,7 +362,7 @@ def chat(body, ip):
         print("Chat AI error:", type(e).__name__, e)
         with lock:  # drop the broken turn so the history stays valid
             sessions.pop(sid, None)
-        return {"session": None, "text": t("error", lang)}
+        return {"session": None, "text": t("error", lang), "buttons": menu}
     finally:
         s["busy"] = False
 
@@ -572,7 +597,7 @@ class Handler(BaseHTTPRequestHandler):
         data = body.encode() if isinstance(body, str) else body
         self.send_response(status)
         origin = self.headers.get("Origin", "")
-        if origin in ORIGINS or origin == self.base() or origin.startswith("http://localhost"):
+        if origin in ORIGINS or origin == self.base() or re.fullmatch(r"http://(localhost|127\.0\.0\.1)(:\d+)?", origin):
             self.send_header("Access-Control-Allow-Origin", origin)
             self.send_header("Vary", "Origin")
             self.send_header("Access-Control-Allow-Headers", "Content-Type")
@@ -603,13 +628,14 @@ class Handler(BaseHTTPRequestHandler):
         if urllib.parse.urlsplit(self.path).path != "/chat":
             return self.send(404, "Not found", "text/plain")
         try:
-            length = min(int(self.headers.get("Content-Length") or 0), 4000)
+            length = max(0, min(int(self.headers.get("Content-Length") or 0), 4000))
             body = json.loads(self.rfile.read(length) or b"{}")
-            ip = self.headers.get("X-Forwarded-For", self.client_address[0]).split(",")[0].strip()
+            # Railway's proxy appends the real client address last; earlier values can be faked
+            ip = self.headers.get("X-Forwarded-For", self.client_address[0]).split(",")[-1].strip()
             result = chat(body if isinstance(body, dict) else {}, ip)
         except Exception as e:
             print("Chat error:", type(e).__name__, e)
-            result = {"session": None, "text": t("error", "en")}
+            result = {"session": None, "text": t("error", "en"), "buttons": [{"label": t("menu", "en"), "action": "menu"}]}
         self.send(200, json.dumps(result, ensure_ascii=False), "application/json; charset=utf-8")
 
 
