@@ -33,6 +33,16 @@ Clean style with emoji buttons and a short welcome text. English, Русский
 
 Categories and products are read live from henderson.am (refreshed every 30 minutes), so there is nothing to update by hand.
 
+## Website chat assistant (chat.py)
+A chat bubble for henderson.am. Henderson's web team adds one line to the site:
+`<script src="https://<railway domain>/widget.js" defer></script>`
+- Buttons (no AI cost): catalog sections → categories → product cards (photo, price, View, Order or reserve), sizes, tailoring, made-to-measure, stores, delivery, promotions. EN / RU / HY.
+- Typed questions: Claude Opus 5.5 (effort low, prompt caching, automatic fallback if a request is declined) with tools: search, categories, category products, shop info, send request. Answers end with product cards and up to 3 suggested replies.
+- Requests go to the same Telegram admins as the bot (marked "website chat"), only after the visitor confirms and agrees to share name and phone.
+- Limits: 40 AI messages per visitor address per hour, 25 per chat, 500 characters per message.
+- Needs the Railway variable `ANTHROPIC_API_KEY` (without it, buttons work and typed questions get a friendly "use the buttons" reply). Allowed sites: `CHAT_ORIGINS` (default henderson.am).
+- Privacy page: `/privacy` (fill in [COMPANY] and [EMAIL] in webtext.py first). Preview: `PREVIEW=1 PORT=8081 python3 chat.py`.
+
 ## Run
 The bot runs on **Railway** (project `henderson-bot`, service `bot`), so it works when the Mac is off.
 - Code comes from the private GitHub repo `varujanharutyunyan-5/Henderson-bot` (branch `main`); every `git push` redeploys it.
@@ -47,6 +57,7 @@ To test locally, stop the Railway service first.
 - `bot.py`: the bot (plain Python, nothing to install)
 - `.env`: the bot token from @BotFather (`BOT_TOKEN=...`). Keep it secret.
 - `admin.json`: the chat that receives order/reservation requests (created by `/admin`)
+- `chat.py`, `webtext.py`: website chat assistant and its texts
 - `translations.py`: texts in English, Russian and Armenian
 - `langs.json`: each user's chosen language (created automatically)
 - `welcome.png`: the start page photo (1280×1280)

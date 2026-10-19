@@ -8,6 +8,7 @@ import json
 import os
 import re
 import ssl
+import sys
 import threading
 import time
 import urllib.error
@@ -1007,6 +1008,10 @@ def main():
     BOT["username"] = me["username"]
     print(f"Bot @{me['username']} is running. Press Ctrl+C to stop.")
     threading.Thread(target=index_loop, daemon=True).start()  # search list, built in the background
+    if os.environ.get("PORT"):  # on the server: also run the website chat assistant
+        import chat
+        threading.Thread(target=chat.serve, args=(sys.modules[__name__], int(os.environ["PORT"])),
+                         daemon=True).start()
     offset = 0
     while True:
         try:
