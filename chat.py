@@ -398,7 +398,7 @@ function cards(list){ if (!list || !list.length) return; var row = document.crea
     row.appendChild(c); });
   log.appendChild(row); scroll(); }
 function buttons(list){ btns.innerHTML = ''; list = list || [];
-  var first = !log.querySelector('.me');
+  var first = !log.querySelector('.me'); log.classList.toggle('chatting', !first);
   btns.className = 'btns' + (first && list.some(function(b){ return b.icon; }) ? ' tiles' : '');
   list.forEach(function(b){ var x = document.createElement('button');
     x.innerHTML = (b.icon ? svg(ICONS[b.icon]) : '') + '<span></span>'; x.querySelector('span').textContent = b.label;
@@ -496,7 +496,8 @@ def watermark_css():
     if WATERMARK == "single":
         svg = ('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 40 41"><g fill="#15284B" fill-opacity="0.045">'
                + LOGO_PATHS + "</g></svg>")
-        return ".log{background:url(data:image/svg+xml," + urllib.parse.quote(svg) + ") no-repeat 50% 85%/150px}"
+        return (".log{background:url(data:image/svg+xml," + urllib.parse.quote(svg) + ") no-repeat 50% 85%/150px}"
+                ".log.chatting{background-position:50% 62%}")  # a bit higher once the chat has started
     # 96x96 tile with two small logos, offset like a monogram fabric
     logo = '<g fill="#15284B" fill-opacity="0.05" transform="translate({x},{y}) scale(0.6)">' + LOGO_PATHS + "</g>"
     svg = ('<svg xmlns="http://www.w3.org/2000/svg" width="96" height="96" viewBox="0 0 96 96">'
