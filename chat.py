@@ -298,6 +298,22 @@ def pop_line(reply, tag):
     return ((reply[:m.start()] + reply[m.end():]).strip(), m.group(1)) if m else (reply, "")
 
 
+def free_search(text, lang):
+    """Without the AI: search the catalog with the bot's own search (costs nothing)."""
+    if not B.index["items"]:
+        return {"text": t("offline", lang), "buttons": menu_buttons(lang)}
+    items = B.search_products(text)
+    if not items:  # a sentence like "do you have black jeans?": keep only the words that find something
+        words = [w for w in re.findall(r"\w+", text.lower()) if len(w) >= 3 and B.search_products(w)]
+        items = B.search_products(" ".join(words)) if words else []
+    if not items:
+        return {"text": t("nothing", lang).replace("{q}", text[:60]),
+                "buttons": [{"label": t("catalog", lang), "action": "sections"}] + menu_btn(lang)}
+    note = t("found", lang) if len(items) <= PAGE else \
+        t("found_many", lang).replace("{shown}", str(PAGE)).replace("{n}", f"{len(items)}+" if len(items) >= 60 else str(len(items)))
+    return {"text": note, "products": [card(i) for i in items[:PAGE]], "buttons": menu_btn(lang)}
+
+
 def chat(body, ip):
     """POST /chat: {"session", "lang", "action"} for buttons or {"session", "lang", "message"} for AI."""
     lang = body.get("lang") if body.get("lang") in LANGS else "en"
@@ -315,7 +331,7 @@ def chat(body, ip):
     if not text:
         return {"session": sid, "text": ""}
     if not client:
-        return {"session": sid, "text": t("offline", lang), "buttons": menu_buttons(lang)}
+        return {"session": sid, **free_search(text, lang)}
     with lock:
         if now - last_cleanup > 60:
             last_cleanup = now
@@ -362,7 +378,7 @@ ICONS = {  # simple line icons (website rule: SVG icons, never emoji)
 
 WIDGET_JS = r"""(function(){
 if (window.__hendersonChat) return; window.__hendersonChat = 1;
-var API = %(api)s, T = %(texts)s, NAMES = %(names)s, ICONS = %(icons)s, LOGO = %(logo)s;
+var API = %(api)s, AI = %(ai)s, T = %(texts)s, NAMES = %(names)s, ICONS = %(icons)s, LOGO = %(logo)s;
 // language: the visitor's earlier choice, else their browser/phone language, else the page's (henderson.am is Russian)
 var lang = null; try { lang = localStorage.getItem('hchat_lang'); } catch (e) {}
 if (!T[lang]) { lang = null; (navigator.languages || [navigator.language || '']).some(function(l){
@@ -387,7 +403,7 @@ var $ = function(s){ return root.querySelector(s); };
 var panel = $('.panel'), log = $('.log'), btns = $('.btns'), input = $('input');
 function texts(){ var L = T[lang]; host.setAttribute('data-lang', lang); $('.lb').textContent = lang.toUpperCase(); $('.fab span').textContent = L.open; $('.fab').setAttribute('aria-label', L.open);
   $('.ttl strong').textContent = 'HENDERSON'; panel.setAttribute('aria-label', L.title);
-  input.placeholder = L.placeholder; $('.go').textContent = L.send; $('.x').setAttribute('aria-label', L.close);
+  input.placeholder = AI ? L.placeholder : L.search_ph; $('.go').textContent = L.send; $('.x').setAttribute('aria-label', L.close);
   $('footer a').textContent = L.privacy; $('footer a').href = API.replace(/\/chat$/, '/privacy?lang=' + lang); }
 texts();
 var mark = null;
@@ -403,7 +419,8 @@ function cards(list){ if (!list || !list.length) return; var row = document.crea
     c.querySelector('.n').textContent = p.name; c.querySelector('.c').textContent = p.color || '';
     c.querySelector('.p').textContent = p.price; c.querySelector('.a').textContent = p.approx || '';
     var r = c.querySelector('.r'); r.textContent = T[lang].reserve;
-    r.onclick = function(){ say(T[lang].reserve_msg.replace('{item}', p.name + (p.color ? ' (' + p.color + ')' : '') + ', ' + p.price + ' [' + p.id + ']')); };
+    r.onclick = AI ? function(){ say(T[lang].reserve_msg.replace('{item}', p.name + (p.color ? ' (' + p.color + ')' : '') + ', ' + p.price + ' [' + p.id + ']')); }
+      : function(){ mark = null; add('me', T[lang].reserve + ': ' + p.name); send({action: 'stores'}); };  // no AI: show the store phones
     row.appendChild(c); });
   log.appendChild(row); scroll(); }
 function buttons(list){ btns.innerHTML = ''; list = list || [];
@@ -534,7 +551,7 @@ def widget_js(base):
     if base not in _widgets:
         texts = {lang: {k: t(k, lang) for k in WT} for lang in LANGS}
         body = (WIDGET_JS % {"api": json.dumps(base + "/chat"), "texts": json.dumps(texts, ensure_ascii=False),
-                             "names": json.dumps(LANGS, ensure_ascii=False), "icons": json.dumps(ICONS),
+                             "names": json.dumps(LANGS, ensure_ascii=False), "ai": json.dumps(bool(client)), "icons": json.dumps(ICONS),
                              "logo": json.dumps(LOGO_PATHS),
                              "css": (WIDGET_CSS + WATERMARK_CSS).replace("'", "\\'")}).encode()
         _widgets[base] = (body, gzip.compress(body), '"' + hashlib.sha1(body).hexdigest()[:16] + '"')

@@ -43,6 +43,16 @@ WT = {
     "new_chat":  {"en": "This chat is long. Please start a new one.", "ru": "Чат слишком длинный. Начните новый.",
                   "hy": "Չաթը շատ երկար է։ Սկսեք նորը։"},
     "restart":   {"en": "New chat", "ru": "Новый чат", "hy": "Նոր չաթ"},
+    # Free catalog search, used while the AI is off
+    "search_ph": {"en": "Search, e.g. black jeans", "ru": "Поиск, например: черные джинсы",
+                  "hy": "Որոնում, օրինակ՝ սև ջինս"},
+    "found":     {"en": "Here's what I found:", "ru": "Вот что нашлось:", "hy": "Ահա թե ինչ գտա․"},
+    "found_many": {"en": "Here are {shown} of {n} items. Add a colour or type to narrow the search.",
+                   "ru": "Показаны {shown} из {n} товаров. Добавьте цвет или тип, чтобы сузить поиск.",
+                   "hy": "Ցույց է տրված {shown}-ը {n} ապրանքից։ Ավելացրեք գույնը կամ տեսակը՝ որոնումը նեղացնելու համար։"},
+    "nothing":   {"en": "Nothing found for “{q}”. Try other words or pick from the catalog.",
+                  "ru": "По запросу «{q}» ничего не нашлось. Попробуйте другие слова или выберите в каталоге.",
+                  "hy": "«{q}» հարցմամբ ոչինչ չգտնվեց։ Փորձեք այլ բառեր կամ ընտրեք կատալոգից։"},
 }
 
 # Legal pages. [COMPANY] and [EMAIL] must be replaced with the real details before going public.
