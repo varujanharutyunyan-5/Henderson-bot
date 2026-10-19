@@ -381,38 +381,40 @@ function texts(){ var L = T[lang]; $('.fab span').textContent = L.open; $('.fab'
   input.placeholder = L.placeholder; $('.go').setAttribute('aria-label', L.send); $('.x').setAttribute('aria-label', L.close);
   $('footer a').textContent = L.privacy; $('footer a').href = API.replace(/\/chat$/, '/privacy?lang=' + lang); }
 texts();
-function scroll(){ log.scrollTop = log.scrollHeight; }
+var mark = null;
+function scroll(){ if (mark && mark.parentNode) { log.scrollTop = Math.max(0, mark.offsetTop - 12); } else { log.scrollTop = log.scrollHeight; } }
 function add(cls, text){ if (!text) return; var d = document.createElement('div'); d.className = 'msg ' + cls;
   d.textContent = text; log.appendChild(d); scroll(); return d; }
 function cards(list){ if (!list || !list.length) return; var row = document.createElement('div'); row.className = 'cards';
   list.forEach(function(p){ var c = document.createElement('article'); c.className = 'card';
-    c.innerHTML = '<a class="img" target="_blank" rel="noopener"><img loading="lazy" alt=""></a><div class="b"><div class="n"></div>' +
-      '<div class="c"></div><div class="p"></div><div class="a"></div><div class="row"><a class="v" target="_blank" rel="noopener"></a><button class="r"></button></div></div>';
-    c.querySelector('img').src = p.photo; c.querySelector('img').alt = p.name; c.querySelector('.img').href = p.url;
+    c.innerHTML = '<a class="img" target="_blank" rel="noopener"><img loading="lazy" alt=""></a><div class="b">' +
+      '<a class="n" target="_blank" rel="noopener"></a><div class="c"></div><div class="p"></div><div class="a"></div><button class="r"></button></div>';
+    c.querySelector('img').src = p.photo; c.querySelector('img').alt = p.name;
+    c.querySelector('.img').href = c.querySelector('.n').href = p.url; c.querySelector('.n').title = T[lang].view;
     c.querySelector('.n').textContent = p.name; c.querySelector('.c').textContent = p.color || '';
     c.querySelector('.p').textContent = p.price; c.querySelector('.a').textContent = p.approx || '';
-    var v = c.querySelector('.v'); v.href = p.url; v.textContent = T[lang].view;
     var r = c.querySelector('.r'); r.textContent = T[lang].reserve;
     r.onclick = function(){ say(T[lang].reserve_msg.replace('{item}', p.name + (p.color ? ' (' + p.color + ')' : '') + ', ' + p.price + ' [' + p.id + ']')); };
     row.appendChild(c); });
   log.appendChild(row); scroll(); }
 function buttons(list){ btns.innerHTML = ''; list = list || [];
-  btns.className = 'btns' + (list.some(function(b){ return b.icon; }) ? ' tiles' : '');
+  var first = !log.querySelector('.me');
+  btns.className = 'btns' + (first && list.some(function(b){ return b.icon; }) ? ' tiles' : '');
   list.forEach(function(b){ var x = document.createElement('button');
     x.innerHTML = (b.icon ? svg(ICONS[b.icon]) : '') + '<span></span>'; x.querySelector('span').textContent = b.label;
     if (b.say) x.className = 'say';
     x.onclick = function(){ if (b.action === 'reset') { sid = null; log.innerHTML = ''; send({action: 'menu'}); }
-      else if (b.say) { say(b.say); } else { add('me', b.label); send({action: b.action}); } };
+      else if (b.say) { say(b.say); } else { mark = null; add('me', b.label); send({action: b.action}); } };
     btns.appendChild(x); }); }
 function send(body){ body.session = sid; body.lang = lang; var w = add('bot wait', T[lang].typing);
   input.disabled = true; btns.innerHTML = '';
   fetch(API, {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body)})
-  .then(function(r){ return r.json(); }).then(function(d){ w.remove(); sid = d.session;
+  .then(function(r){ return r.json(); }).then(function(d){ mark = w.previousElementSibling || null; w.remove(); sid = d.session;
     try { sid ? localStorage.setItem('hchat', sid) : localStorage.removeItem('hchat'); } catch (e) {}
     add('bot', d.text); cards(d.products); buttons(d.buttons); })
   .catch(function(){ w.remove(); add('bot', T[lang].error); buttons([{label: T[lang].menu, action: 'menu'}]); })
   .then(function(){ input.disabled = false; input.focus(); }); }
-function say(text){ add('me', text); send({message: text}); }
+function say(text){ mark = null; add('me', text); send({message: text}); }
 $('.fab').onclick = function(){ panel.hidden = false; $('.fab').hidden = true; if (!log.children.length) send({action: 'menu'}); input.focus(); };
 $('.x').onclick = function(){ panel.hidden = true; $('.fab').hidden = false; $('.fab').focus(); };
 root.addEventListener('keydown', function(e){ if (e.key === 'Escape' && !panel.hidden) $('.x').onclick(); });
@@ -440,19 +442,21 @@ WIDGET_CSS = (
     ".me{background:#15284B;color:#fff;border-radius:12px 12px 3px 12px;align-self:flex-end}"
     ".wait{color:#7a7e85;font-style:italic}"
     ".cards{display:flex;gap:10px;overflow-x:auto;padding:2px 2px 6px;scroll-snap-type:x mandatory}"
-    ".card{flex:0 0 168px;background:#fff;border:1px solid #e6e2da;border-radius:10px;overflow:hidden;scroll-snap-align:start;display:flex;flex-direction:column}"
-    ".card .img{display:block;background:#efece6}.card img{width:100%;aspect-ratio:3/4;object-fit:cover;display:block}"
-    ".card .b{padding:9px 10px 10px;display:flex;flex-direction:column;flex:1;font-size:13px}"
-    ".card .n{font-weight:600;line-height:1.3;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}"
-    ".card .c{color:#7a7e85;font-size:12px;margin-top:2px}.card .p{color:#15284B;font-weight:700;font-size:15px;margin-top:6px}"
-    ".card .a{color:#7a7e85;font-size:11.5px}.card .row{display:flex;gap:6px;margin-top:auto;padding-top:8px}"
-    ".card .v,.card .r{flex:1;text-align:center;font-size:12px;border-radius:6px;padding:7px 4px;text-decoration:none}"
-    ".card .v{border:1px solid #cfcac1;color:#15284B}.card .r{border:0;background:#15284B;color:#fff}"
-    ".card .v:hover{border-color:#15284B}.card .r:hover{background:#0e1c36}"
-    ".btns{display:flex;flex-wrap:wrap;gap:6px;padding:4px 14px 10px;max-height:170px;overflow:auto}"
-    ".btns button{display:flex;gap:6px;align-items:center;background:#fff;border:1px solid #d9d4ca;border-radius:6px;padding:7px 11px;color:#15284B;font-size:13px}"
+    ".card{flex:0 0 140px;background:#fff;border:1px solid #e6e2da;border-radius:10px;overflow:hidden;scroll-snap-align:start;display:flex;flex-direction:column}"
+    ".card .img{display:block;background:#efece6}.card img{width:100%;aspect-ratio:4/5;object-fit:cover;display:block}"
+    ".card .b{padding:8px 9px 9px;display:flex;flex-direction:column;flex:1;font-size:12.5px}"
+    ".card .n{color:inherit;text-decoration:none;font-weight:600;line-height:1.3;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}"
+    ".card .n:hover{text-decoration:underline}.card .c{color:#7a7e85;font-size:12px;margin-top:2px}"
+    ".card .p{color:#15284B;font-weight:700;font-size:14px;margin-top:4px}"
+    ".card .a{color:#7a7e85;font-size:11px}"
+    ".card .r{margin-top:auto;border:0;background:#15284B;color:#fff;font-size:12px;border-radius:6px;padding:7px 4px;margin-top:8px}"
+    ".card .r:hover{background:#0e1c36}"
+    ".btns{display:flex;flex-wrap:nowrap;gap:6px;padding:6px 14px 8px;overflow-x:auto;scrollbar-width:thin;flex:none}"
+    ".btns:empty{display:none}"
+    ".btns button{flex:none;white-space:nowrap;display:flex;gap:6px;align-items:center;background:#fff;border:1px solid #d9d4ca;border-radius:6px;padding:6px 10px;color:#15284B;font-size:13px}"
+    ".btns button .i{width:15px;height:15px}"
     ".btns button:hover{border-color:#15284B}.btns button.say{background:#eef1f7;border-color:#d5dceb}"
-    ".btns.tiles{display:grid;grid-template-columns:1fr 1fr;max-height:none}.btns.tiles button{padding:10px;text-align:left}"
+    ".btns.tiles{display:grid;grid-template-columns:1fr 1fr;overflow:visible}.btns.tiles button{white-space:normal;padding:8px 10px;text-align:left}"
     "form{display:flex;gap:8px;padding:10px 12px;border-top:1px solid #e6e2da;background:#fff}"
     "form input{flex:1;min-width:0;border:1px solid #d9d4ca;border-radius:8px;padding:10px 12px;background:#faf9f6}"
     "form input:focus{outline:none;border-color:#15284B;background:#fff}"
