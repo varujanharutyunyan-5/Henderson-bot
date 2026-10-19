@@ -373,6 +373,7 @@ root.innerHTML = '<style>%(css)s</style>' +
  '<div class="ttl"><strong></strong></div>' +
  '<button class="lb" aria-label="Language"></button>' +
  '<button class="x">' + svg('<path d="M6 6l12 12M18 6 6 18"/>') + '</button></header>' +
+ '<div class="lmenu" role="menu" hidden></div>' +
  '<div class="log" aria-live="polite"></div><div class="btns"></div>' +
  '<form><input maxlength="500" autocomplete="off"><button class="go"></button></form>' +
  '<footer><a target="_blank" rel="noopener"></a></footer></section>';
@@ -421,16 +422,19 @@ function send(body){ body.session = sid; body.lang = lang; var w = add('bot wait
   .catch(function(){ w.remove(); add('bot', T[lang].error); buttons([{label: T[lang].menu, action: 'menu'}]); })
   .then(function(){ input.disabled = false; input.focus(); }); }
 function showLang(){
-  log.innerHTML = ''; btns.innerHTML = ''; mark = null; log.classList.remove('chatting');
-  var p = document.createElement('div'); p.className = 'langpage';
-  p.innerHTML = svg(LOGO, 'mono') + '<p class="lt">Choose a language<br>Выберите язык<br>Ընտրեք լեզուն</p>';
+  var m = $('.lmenu'); if (!m.hidden) { m.hidden = true; return; }
+  m.innerHTML = '';
   ['hy', 'ru', 'en'].forEach(function(code){ var b = document.createElement('button');
-    b.className = 'lbtn' + (code === lang ? ' on' : ''); b.innerHTML = '<span></span><small></small>';
+    b.setAttribute('role', 'menuitem'); b.className = code === lang ? 'on' : '';
+    b.innerHTML = '<span></span><small></small>';
     b.querySelector('span').textContent = NAMES[code]; b.querySelector('small').textContent = code.toUpperCase();
-    b.onclick = function(){ lang = code; chosen = true; try { localStorage.setItem('hchat_lang', lang); } catch (e) {}
+    b.onclick = function(){ m.hidden = true; if (code === lang) return;
+      lang = code; try { localStorage.setItem('hchat_lang', lang); } catch (e) {}
       texts(); log.innerHTML = ''; send({action: 'menu'}); };
-    p.appendChild(b); });
-  log.appendChild(p); log.scrollTop = 0; }
+    m.appendChild(b); });
+  m.hidden = false; m.firstChild.focus(); }
+root.addEventListener('click', function(e){ var m = $('.lmenu');
+  if (!m.hidden && !e.composedPath().some(function(n){ return n === m || n === $('.lb'); })) m.hidden = true; });
 function say(text){ mark = null; add('me', text); send({message: text}); }
 $('.fab').onclick = function(){ panel.hidden = false; $('.fab').hidden = true;
   if (!log.children.length) send({action: 'menu'}); input.focus(); };
@@ -456,13 +460,14 @@ WIDGET_CSS = (  # Henderson look: navy on white, near-square corners, letter-spa
     ".ttl strong{font-weight:600;font-size:13px;letter-spacing:.24em}"
     ".lb{background:transparent;color:#fff;border:1px solid rgba(255,255,255,.45);border-radius:2px;padding:3px 8px;font-size:11.5px;font-weight:600;letter-spacing:.1em}"
     ".lb:hover{background:rgba(255,255,255,.15)}"
-    ".langpage{margin:auto 0;display:flex;flex-direction:column;align-items:center;gap:10px;padding:8px 18px 18px;background:#fff}"
-    ".mono{width:58px;height:60px;fill:#15284B;margin-bottom:4px}"
-    ".lt{margin:0 0 10px;text-align:center;color:#4f535a;font-size:13.5px;line-height:1.6}"
-    ".lbtn{width:100%;display:flex;justify-content:space-between;align-items:center;background:#fff;color:#15284B;"
-    "border:1px solid #15284B;border-radius:2px;padding:14px 16px;font-size:15px;font-weight:500}"
-    ".lbtn small{font-size:11px;font-weight:600;letter-spacing:.12em;opacity:.7}"
-    ".lbtn:hover,.lbtn.on{background:#15284B;color:#fff}"
+    ".panel{position:relative}"
+    ".lmenu{position:absolute;top:44px;right:42px;z-index:3;background:#fff;border:1px solid #15284B;border-radius:2px;"
+    "box-shadow:0 8px 20px rgba(0,0,0,.15);display:flex;flex-direction:column;min-width:150px;padding:4px 0}"
+    ".lmenu[hidden]{display:none}"
+    ".lmenu button{display:flex;justify-content:space-between;align-items:center;gap:16px;background:#fff;border:0;"
+    "padding:9px 14px;font-size:14px;color:#111316;text-align:left}"
+    ".lmenu button small{font-size:10.5px;font-weight:600;letter-spacing:.12em;color:#4f535a}"
+    ".lmenu button:hover{background:#eef0f5}.lmenu button.on{background:#15284B;color:#fff}.lmenu button.on small{color:#fff}"
     ".x{background:none;border:0;color:#fff;padding:4px;border-radius:2px;display:flex}.x:hover{background:rgba(255,255,255,.15)}"
     ".log{flex:1;overflow:auto;padding:16px 14px 8px;display:flex;flex-direction:column;gap:10px}.log>*{flex-shrink:0}"
     ".msg{max-width:86%;padding:9px 12px;white-space:pre-wrap;word-wrap:break-word;font-size:14.5px;border-radius:3px}"
