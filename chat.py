@@ -357,8 +357,11 @@ ICONS = {  # simple line icons (website rule: SVG icons, never emoji)
 WIDGET_JS = r"""(function(){
 if (window.__hendersonChat) return; window.__hendersonChat = 1;
 var API = %(api)s, T = %(texts)s, ICONS = %(icons)s, LOGO = %(logo)s;
-var lang = (document.documentElement.lang || navigator.language || 'en').slice(0,2).toLowerCase();
-if (!T[lang]) lang = 'en';
+// language: the visitor's earlier choice, else their browser/phone language, else the page's (henderson.am is Russian)
+var lang = null; try { lang = localStorage.getItem('hchat_lang'); } catch (e) {}
+if (!T[lang]) { lang = null; (navigator.languages || [navigator.language || '']).some(function(l){
+  l = (l || '').slice(0,2).toLowerCase(); if (l === 'am') l = 'hy'; if (T[l]) { lang = l; return true; } }); }
+if (!lang) { lang = (document.documentElement.lang || '').slice(0,2).toLowerCase(); if (!T[lang]) lang = 'ru'; }
 var sid = null; try { sid = localStorage.getItem('hchat'); } catch (e) {}
 function svg(p, cls){ return '<svg class="' + (cls || 'i') + '" viewBox="' + (cls === 'logo' ? '0 0 40 41' : '0 0 24 24') + '" aria-hidden="true">' + p + '</svg>'; }
 var host = document.createElement('div'); host.style.cssText = 'position:fixed;right:20px;bottom:20px;z-index:2147483000';
@@ -420,7 +423,7 @@ function say(text){ mark = null; add('me', text); send({message: text}); }
 $('.fab').onclick = function(){ panel.hidden = false; $('.fab').hidden = true; if (!log.children.length) send({action: 'menu'}); input.focus(); };
 $('.x').onclick = function(){ panel.hidden = true; $('.fab').hidden = false; $('.fab').focus(); };
 root.addEventListener('keydown', function(e){ if (e.key === 'Escape' && !panel.hidden) $('.x').onclick(); });
-sel.onchange = function(){ lang = sel.value; texts(); log.innerHTML = ''; send({action: 'menu'}); };
+sel.onchange = function(){ lang = sel.value; try { localStorage.setItem('hchat_lang', lang); } catch (e) {} texts(); log.innerHTML = ''; send({action: 'menu'}); };
 $('form').onsubmit = function(e){ e.preventDefault(); var v = input.value.trim(); if (!v) return; input.value = ''; say(v); };
 })();"""
 

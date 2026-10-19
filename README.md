@@ -7,7 +7,7 @@ Clean style with emoji buttons and a short welcome text. English, Русский
 
 - `/start` → first time: choose a language; then the logo photo `welcome.png` with the main menu:
   - **🔍 Search** → type a word in English, Russian or Armenian (coat, пальто, վերարկու, black jeans). Typing any text in the chat also searches.
-  - **🛍 Catalog** → sections (Suits, Winter clothes, Shirts & polos, Trousers & jeans, Sportswear, Shoes, Bags, Accessories, Home & underwear, 🎁 Gifts, 👜 Unisex, Other) → the site's categories → products
+  - **🛍 Catalog** → sections (Suits & formal wear, Winter clothes, Shirts & polos, Trousers & jeans, Sportswear, Shoes, Bags, Accessories, Home & underwear, 🎁 Gifts, 👜 Unisex, Other) → the site's categories → products
   - **📏 Sizes & measuring** → how to measure yourself + approximate size table (general guide, not from the site)
   - **✂️ Tailoring & fitting** → services; free within 30 days of purchase; 24 h–7 days
   - **🧵 Made-to-measure** → Su Misura suits and shirts (also women's shirts)
