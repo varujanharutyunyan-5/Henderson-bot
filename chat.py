@@ -363,7 +363,7 @@ if (!T[lang]) { lang = null; (navigator.languages || [navigator.language || ''])
   l = (l || '').slice(0,2).toLowerCase(); if (l === 'am') l = 'hy'; if (T[l]) { lang = l; return true; } }); }
 if (!lang) { lang = (document.documentElement.lang || '').slice(0,2).toLowerCase(); if (!T[lang]) lang = 'ru'; }
 var sid = null; try { sid = localStorage.getItem('hchat'); } catch (e) {}
-function svg(p, cls){ return '<svg class="' + (cls || 'i') + '" viewBox="' + (cls === 'logo' ? '0 0 40 41' : '0 0 24 24') + '" aria-hidden="true">' + p + '</svg>'; }
+function svg(p, cls){ return '<svg class="' + (cls || 'i') + '" viewBox="' + (cls === 'logo' || cls === 'mono' ? '0 0 40 41' : '0 0 24 24') + '" aria-hidden="true">' + p + '</svg>'; }
 var host = document.createElement('div'); host.style.cssText = 'position:fixed;right:20px;bottom:20px;z-index:2147483000';
 document.body.appendChild(host);
 var root = host.attachShadow({mode: 'open'});
@@ -371,15 +371,16 @@ root.innerHTML = '<style>%(css)s</style>' +
  '<button class="fab">' + svg('<path d="M4 5h16v11H9l-5 4z"/>') + '<span></span></button>' +
  '<section class="panel" role="dialog" hidden><header>' + svg(LOGO, 'logo') +
  '<div class="ttl"><strong></strong></div>' +
- '<select aria-label="Language"><option value="en">EN</option><option value="ru">RU</option><option value="hy">HY</option></select>' +
+ '<button class="lb" aria-label="Language"></button>' +
  '<button class="x">' + svg('<path d="M6 6l12 12M18 6 6 18"/>') + '</button></header>' +
  '<div class="log" aria-live="polite"></div><div class="btns"></div>' +
  '<form><input maxlength="500" autocomplete="off"><button class="go"></button></form>' +
  '<footer><a target="_blank" rel="noopener"></a></footer></section>';
 var $ = function(s){ return root.querySelector(s); };
-var panel = $('.panel'), log = $('.log'), btns = $('.btns'), input = $('input'), sel = $('select');
-sel.value = lang;
-function texts(){ var L = T[lang]; host.setAttribute('data-lang', lang); $('.fab span').textContent = L.open; $('.fab').setAttribute('aria-label', L.open);
+var panel = $('.panel'), log = $('.log'), btns = $('.btns'), input = $('input');
+var chosen = false; try { chosen = !!localStorage.getItem('hchat_lang'); } catch (e) {}
+var NAMES = {en: 'English', ru: 'Русский', hy: 'Հայերեն'};
+function texts(){ var L = T[lang]; host.setAttribute('data-lang', lang); $('.lb').textContent = lang.toUpperCase(); $('.fab span').textContent = L.open; $('.fab').setAttribute('aria-label', L.open);
   $('.ttl strong').textContent = 'HENDERSON'; panel.setAttribute('aria-label', L.title);
   input.placeholder = L.placeholder; $('.go').textContent = L.send; $('.x').setAttribute('aria-label', L.close);
   $('footer a').textContent = L.privacy; $('footer a').href = API.replace(/\/chat$/, '/privacy?lang=' + lang); }
@@ -419,11 +420,23 @@ function send(body){ body.session = sid; body.lang = lang; var w = add('bot wait
     mark = log.children[start] || null; scroll(); })
   .catch(function(){ w.remove(); add('bot', T[lang].error); buttons([{label: T[lang].menu, action: 'menu'}]); })
   .then(function(){ input.disabled = false; input.focus(); }); }
+function showLang(){
+  log.innerHTML = ''; btns.innerHTML = ''; mark = null; log.classList.remove('chatting');
+  var p = document.createElement('div'); p.className = 'langpage';
+  p.innerHTML = svg(LOGO, 'mono') + '<p class="lt">Choose a language<br>Выберите язык<br>Ընտրեք լեզուն</p>';
+  ['hy', 'ru', 'en'].forEach(function(code){ var b = document.createElement('button');
+    b.className = 'lbtn' + (code === lang ? ' on' : ''); b.innerHTML = '<span></span><small></small>';
+    b.querySelector('span').textContent = NAMES[code]; b.querySelector('small').textContent = code.toUpperCase();
+    b.onclick = function(){ lang = code; chosen = true; try { localStorage.setItem('hchat_lang', lang); } catch (e) {}
+      texts(); log.innerHTML = ''; send({action: 'menu'}); };
+    p.appendChild(b); });
+  log.appendChild(p); log.scrollTop = 0; }
 function say(text){ mark = null; add('me', text); send({message: text}); }
-$('.fab').onclick = function(){ panel.hidden = false; $('.fab').hidden = true; if (!log.children.length) send({action: 'menu'}); input.focus(); };
+$('.fab').onclick = function(){ panel.hidden = false; $('.fab').hidden = true;
+  if (!log.children.length) send({action: 'menu'}); input.focus(); };
+$('.lb').onclick = showLang;
 $('.x').onclick = function(){ panel.hidden = true; $('.fab').hidden = false; $('.fab').focus(); };
 root.addEventListener('keydown', function(e){ if (e.key === 'Escape' && !panel.hidden) $('.x').onclick(); });
-sel.onchange = function(){ lang = sel.value; try { localStorage.setItem('hchat_lang', lang); } catch (e) {} texts(); log.innerHTML = ''; send({action: 'menu'}); };
 $('form').onsubmit = function(e){ e.preventDefault(); var v = input.value.trim(); if (!v) return; input.value = ''; say(v); };
 })();"""
 
@@ -441,8 +454,16 @@ WIDGET_CSS = (  # Henderson look: navy on white, near-square corners, letter-spa
     "header{display:flex;gap:10px;align-items:center;background:#15284B;color:#fff;padding:9px 10px 9px 14px}"
     ".logo{width:22px;height:23px;fill:#fff;flex:none}.ttl{flex:1;min-width:0}"
     ".ttl strong{font-weight:600;font-size:13px;letter-spacing:.24em}"
-    "header select{background:transparent;color:#fff;border:0;padding:2px;font-size:12px;letter-spacing:.06em}"
-    ".x{background:none;border:0;color:#fff;padding:4px;border-radius:2px;display:flex}.x:hover{background:rgba(255,255,255,.15)}header select option{color:#000}"
+    ".lb{background:transparent;color:#fff;border:1px solid rgba(255,255,255,.45);border-radius:2px;padding:3px 8px;font-size:11.5px;font-weight:600;letter-spacing:.1em}"
+    ".lb:hover{background:rgba(255,255,255,.15)}"
+    ".langpage{margin:auto 0;display:flex;flex-direction:column;align-items:center;gap:10px;padding:8px 18px 18px;background:#fff}"
+    ".mono{width:58px;height:60px;fill:#15284B;margin-bottom:4px}"
+    ".lt{margin:0 0 10px;text-align:center;color:#4f535a;font-size:13.5px;line-height:1.6}"
+    ".lbtn{width:100%;display:flex;justify-content:space-between;align-items:center;background:#fff;color:#15284B;"
+    "border:1px solid #15284B;border-radius:2px;padding:14px 16px;font-size:15px;font-weight:500}"
+    ".lbtn small{font-size:11px;font-weight:600;letter-spacing:.12em;opacity:.7}"
+    ".lbtn:hover,.lbtn.on{background:#15284B;color:#fff}"
+    ".x{background:none;border:0;color:#fff;padding:4px;border-radius:2px;display:flex}.x:hover{background:rgba(255,255,255,.15)}"
     ".log{flex:1;overflow:auto;padding:16px 14px 8px;display:flex;flex-direction:column;gap:10px}.log>*{flex-shrink:0}"
     ".msg{max-width:86%;padding:9px 12px;white-space:pre-wrap;word-wrap:break-word;font-size:14.5px;border-radius:3px}"
     ".bot{background:#f0f1f4;border:1px solid #f0f1f4;align-self:flex-start}"
