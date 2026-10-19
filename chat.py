@@ -488,7 +488,7 @@ LOGO_PATHS = ('<polygon points="27.2,27.5 23.1,27.5 23.1,21.9 16.9,21.9 16.9,27.
               'l3.2,3.2L33,23.6l0.8,0.8C35.1,25.6,35.9,27.4,35.9,29.3L35.9,29.3z"/>')
 
 
-WATERMARK = os.environ.get("CHAT_WATERMARK", "pattern")  # "pattern" (many small logos) or "single"
+WATERMARK = os.environ.get("CHAT_WATERMARK", "single")  # "pattern" (many small logos) or "single"
 
 
 def watermark_css():
