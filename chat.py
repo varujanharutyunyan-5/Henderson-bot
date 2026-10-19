@@ -497,11 +497,11 @@ def watermark_css():
         svg = ('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 40 41"><g fill="#15284B" fill-opacity="0.045">'
                + LOGO_PATHS + "</g></svg>")
         return ".log{background:url(data:image/svg+xml," + urllib.parse.quote(svg) + ") no-repeat 50% 58%/150px}"
-    # 72x72 tile with two small logos, offset like a monogram fabric
-    logo = '<g fill="#15284B" fill-opacity="0.05" transform="translate({x},{y}) scale(0.42)">' + LOGO_PATHS + "</g>"
-    svg = ('<svg xmlns="http://www.w3.org/2000/svg" width="72" height="72" viewBox="0 0 72 72">'
-           + logo.format(x=6, y=6) + logo.format(x=42, y=42) + "</svg>")
-    return ".log{background:url(data:image/svg+xml," + urllib.parse.quote(svg) + ") repeat 0 0/72px 72px}"
+    # 96x96 tile with two small logos, offset like a monogram fabric
+    logo = '<g fill="#15284B" fill-opacity="0.05" transform="translate({x},{y}) scale(0.6)">' + LOGO_PATHS + "</g>"
+    svg = ('<svg xmlns="http://www.w3.org/2000/svg" width="96" height="96" viewBox="0 0 96 96">'
+           + logo.format(x=10, y=10) + logo.format(x=58, y=58) + "</svg>")
+    return ".log{background:url(data:image/svg+xml," + urllib.parse.quote(svg) + ") repeat 0 0/96px 96px}"
 
 
 def widget_js(base):
