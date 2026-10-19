@@ -488,18 +488,27 @@ LOGO_PATHS = ('<polygon points="27.2,27.5 23.1,27.5 23.1,21.9 16.9,21.9 16.9,27.
               'l3.2,3.2L33,23.6l0.8,0.8C35.1,25.6,35.9,27.4,35.9,29.3L35.9,29.3z"/>')
 
 
-def watermark():
-    """Data URL of the H monogram at ~4% opacity, for the chat background."""
-    svg = ('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 40 41"><g fill="#15284B" fill-opacity="0.045">'
-           + LOGO_PATHS + "</g></svg>")
-    return "data:image/svg+xml," + urllib.parse.quote(svg)
+WATERMARK = os.environ.get("CHAT_WATERMARK", "pattern")  # "pattern" (many small logos) or "single"
+
+
+def watermark_css():
+    """Faint H monogram behind the chat: one large logo, or a staggered pattern of small ones."""
+    if WATERMARK == "single":
+        svg = ('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 40 41"><g fill="#15284B" fill-opacity="0.045">'
+               + LOGO_PATHS + "</g></svg>")
+        return ".log{background:url(data:image/svg+xml," + urllib.parse.quote(svg) + ") no-repeat 50% 58%/150px}"
+    # 72x72 tile with two small logos, offset like a monogram fabric
+    logo = '<g fill="#15284B" fill-opacity="0.05" transform="translate({x},{y}) scale(0.42)">' + LOGO_PATHS + "</g>"
+    svg = ('<svg xmlns="http://www.w3.org/2000/svg" width="72" height="72" viewBox="0 0 72 72">'
+           + logo.format(x=6, y=6) + logo.format(x=42, y=42) + "</svg>")
+    return ".log{background:url(data:image/svg+xml," + urllib.parse.quote(svg) + ") repeat 0 0/72px 72px}"
 
 
 def widget_js(base):
     texts = {lang: {k: v.get(lang) or v["en"] for k, v in WT.items()} for lang in LANGS}
     return WIDGET_JS % {"api": json.dumps(base + "/chat"), "texts": json.dumps(texts, ensure_ascii=False),
                         "icons": json.dumps(ICONS), "logo": json.dumps(LOGO_PATHS),
-                        "css": (WIDGET_CSS + ".log{background:url(" + watermark() + ") no-repeat 50% 58%/150px}").replace("'", "\\'")}
+                        "css": (WIDGET_CSS + watermark_css()).replace("'", "\\'")}
 
 
 def privacy_page(lang):
