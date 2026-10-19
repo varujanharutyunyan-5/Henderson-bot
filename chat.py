@@ -426,7 +426,7 @@ function showLang(){
   m.innerHTML = '';
   ['hy', 'ru', 'en'].forEach(function(code){ var b = document.createElement('button');
     b.setAttribute('role', 'menuitem'); b.className = code === lang ? 'on' : '';
-    b.innerHTML = '<span></span><small></small>';
+    b.innerHTML = '<i>' + (code === lang ? svg('<path d="M5 12.5l4.5 4.5L19 7.5"/>') : '') + '</i><span></span><small></small>';
     b.querySelector('span').textContent = NAMES[code]; b.querySelector('small').textContent = code.toUpperCase();
     b.onclick = function(){ m.hidden = true; if (code === lang) return;
       lang = code; try { localStorage.setItem('hchat_lang', lang); } catch (e) {}
@@ -461,14 +461,17 @@ WIDGET_CSS = (  # Henderson look: navy on white, near-square corners, letter-spa
     ".lb{background:transparent;color:#fff;border:1px solid rgba(255,255,255,.45);border-radius:2px;padding:3px 8px;font-size:11.5px;font-weight:600;letter-spacing:.1em}"
     ".lb:hover{background:rgba(255,255,255,.15)}"
     ".panel{position:relative}"
-    ".lmenu{position:absolute;top:var(--hh,45px);right:0;z-index:3;background:#15284B;border-top:1px solid rgba(255,255,255,.18);"
-    "box-shadow:0 10px 22px rgba(0,0,0,.2);display:flex;flex-direction:column;min-width:170px;padding:4px 0}"
+    ".lmenu{position:absolute;top:var(--hh,45px);right:8px;z-index:3;background:#15284B;border-radius:0 0 6px 6px;"
+    "box-shadow:0 14px 28px rgba(0,0,0,.24);display:flex;flex-direction:column;width:210px;padding:6px 0;overflow:hidden}"
     ".lmenu[hidden]{display:none}"
-    ".lmenu button{display:flex;justify-content:space-between;align-items:center;gap:16px;background:transparent;border:0;"
-    "padding:10px 16px;font-size:14px;color:#fff;text-align:left}"
-    ".lmenu button small{font-size:10.5px;font-weight:600;letter-spacing:.14em;opacity:.75}"
-    ".lmenu button:hover{background:rgba(255,255,255,.1)}.lmenu button.on{background:rgba(255,255,255,.16)}"
-    ".lmenu button.on small{opacity:1}"
+    ".lmenu button{display:flex;align-items:center;gap:10px;background:transparent;border:0;padding:13px 18px;"
+    "font-size:14.5px;color:#fff;text-align:left}"
+    ".lmenu button+button{border-top:1px solid rgba(255,255,255,.12)}"
+    ".lmenu button i{width:16px;display:flex;flex:none}.lmenu button i .i{width:16px;height:16px;stroke-width:2.2}"
+    ".lmenu button span{flex:1}"
+    ".lmenu button small{font-size:10.5px;font-weight:600;letter-spacing:.16em;opacity:.6}"
+    ".lmenu button:hover{background:rgba(255,255,255,.08)}"
+    ".lmenu button.on{background:rgba(255,255,255,.12);font-weight:600}.lmenu button.on small{opacity:1}"
     ".x{background:none;border:0;color:#fff;padding:4px;border-radius:2px;display:flex}.x:hover{background:rgba(255,255,255,.15)}"
     ".log{flex:1;overflow:auto;padding:16px 14px 8px;display:flex;flex-direction:column;gap:10px}.log>*{flex-shrink:0}"
     ".msg{max-width:86%;padding:9px 12px;white-space:pre-wrap;word-wrap:break-word;font-size:14.5px;border-radius:3px}"
