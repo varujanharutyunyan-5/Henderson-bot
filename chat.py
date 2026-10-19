@@ -5,6 +5,8 @@ Buttons work without AI. Typed questions go to Claude (needs ANTHROPIC_API_KEY o
 Embed on any page:  <script src="https://<this server>/widget.js" defer></script>
 Preview on the Mac:  PREVIEW=1 PORT=8081 python3 chat.py  →  http://localhost:8081
 """
+import gzip
+import hashlib
 import html
 import json
 import os
@@ -15,6 +17,7 @@ import time
 import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
+from translations import LANGS, STORES
 from webtext import LEGAL, WT
 
 try:  # installed on the server (requirements.txt); optional for previews
@@ -23,7 +26,6 @@ except ImportError:
     anthropic = None
 
 B = None  # the bot module (set in serve)
-LANGS = ("en", "ru", "hy")
 PREVIEW = os.environ.get("PREVIEW") == "1"
 MODEL = "claude-opus-5-5"
 ORIGINS = {o.strip() for o in os.environ.get(
@@ -36,6 +38,7 @@ PAGE = 8                 # product cards per page
 client = anthropic.Anthropic() if anthropic and os.environ.get("ANTHROPIC_API_KEY") else None
 EMOJI = re.compile("[\U0001F000-\U0001FAFF☀-➿⬀-⯿️‍⃣]+\\s*")
 sessions, hits, lock = {}, {}, threading.Lock()
+last_cleanup = 0
 
 
 def plain(text):
@@ -46,20 +49,35 @@ def t(key, lang):
     return WT[key].get(lang) or WT[key]["en"]
 
 
+def menu_btn(lang):
+    return [{"label": t("menu", lang), "action": "menu"}]
+
+
 # ---------- data helpers (shared by buttons and AI tools) ----------
 
+def item_id(item):
+    return item["url"].rstrip("/").rsplit("/", 1)[-1]
+
+
+def brief(item):
+    """A product as the AI sees it."""
+    return {"id": item_id(item), "name": item["name"], "color": item["color"], "price": item["price"],
+            "approx": B.other_prices(item["amd"])}
+
+
 def card(item):
-    """A product as the widget shows it (also what the AI sees, minus the photo)."""
-    return {"id": item["url"].rstrip("/").split("/")[-1], "name": item["name"], "color": item["color"],
-            "price": item["price"], "approx": B.other_prices(item["amd"]), "url": item["url"],
-            "photo": item["photo"]}
+    """A product as the widget shows it."""
+    return {**brief(item), "url": item["url"], "photo": item["photo"]}
+
+
+_by_id = {"items": None, "map": {}}
 
 
 def find_item(pid):
-    for item in B.index["items"]:
-        if item["url"].rstrip("/").endswith("/" + pid):
-            return item
-    return None
+    items = B.index["items"]
+    if _by_id["items"] is not items:  # the search index was rebuilt
+        _by_id.update(items=items, map={item_id(i): i for i in items})
+    return _by_id["map"].get(pid)
 
 
 def stores_text(lang):
@@ -71,18 +89,10 @@ def info_text(key, lang):
 
 
 def promos_text(lang):
-    try:
-        promos = B.load_promos()
-    except Exception:
-        promos = []
+    promos = B.current_promos(lang)
     if not promos:
         return info_text("promo", lang)
-    lines = []
-    for slug, title_ru, until in promos:
-        names = B.PROMO_NAMES.get(slug)
-        name = title_ru if lang == "ru" or not names else names[0 if lang == "en" else 1]
-        lines.append(f"{name} ({B.PROMO['until'][lang]} {until})")
-    return "\n".join(lines)
+    return "\n".join(f"{name} ({B.PROMO['until'][lang]} {until})" for name, until in promos)
 
 
 # ---------- buttons (no AI) ----------
@@ -100,11 +110,11 @@ def menu_buttons(lang):
 
 def do_action(action, lang):
     """Button press → {"text", "products", "buttons"}."""
-    back = [{"label": t("menu", lang), "action": "menu"}]
+    back = menu_btn(lang)
     if action == "menu":
         return {"text": t("hello", lang), "buttons": menu_buttons(lang)}
     if action == "sections":
-        return {"buttons": [{"label": plain(B.group_name(title, lang)), "action": f"group:{gi}"}
+        return {"buttons": [{"label": B.group_label(title, lang), "action": f"group:{gi}"}
                             for gi, (title, _) in enumerate(B.load_groups())] + back}
     if action.startswith("group:"):
         _, ids = B.load_groups()[int(action[6:])]
@@ -181,24 +191,19 @@ TOOLS = [
     {"name": "shop_info", "description": "Store addresses, phones and hours; size table and how to "
      "measure; tailoring/fitting; made-to-measure; delivery, returns and guarantee; current promotions.",
      "input_schema": {"type": "object", "properties": {"topic": {"type": "string", "enum": [
-         "stores", "sizes", "tailoring", "made_to_measure", "delivery_returns", "promotions"]}},
+         "stores", "sizes", "tailor", "mtm", "delivery", "promos"]}},
                       "required": ["topic"], "additionalProperties": False}, "strict": True},
     {"name": "send_request", "description": "Send an order/reservation/service request to the store staff. "
      "Only after the visitor confirmed the details and agreed to share name and phone.",
      "input_schema": {"type": "object", "properties": {
          "type": {"type": "string", "enum": ["order", "reserve", "fitting", "made_to_measure", "other"]},
-         "store": {"type": "string", "enum": ["Rio Mall", "Sayat-Nova Ave 8", "Dalma Garden Mall"]},
+         "store": {"type": "string", "enum": STORES["en"]},
          "product_id": {"type": "string", "description": "Product id from tool results, or empty"},
          "size": {"type": "string"}, "message": {"type": "string"},
          "name": {"type": "string"}, "phone": {"type": "string"}},
          "required": ["type", "store", "product_id", "size", "message", "name", "phone"],
          "additionalProperties": False}, "strict": True},
 ]
-
-
-def brief(item):
-    c = card(item)
-    return {k: c[k] for k in ("id", "name", "color", "price", "approx")}
 
 
 def run_tool(name, args, s):
@@ -209,7 +214,7 @@ def run_tool(name, args, s):
         items = B.search_products(args["query"])[:12]
     elif name == "list_categories":
         nodes = B.load_menu()
-        return [{"section": plain(B.group_name(title, "en")),
+        return [{"section": B.group_label(title, "en"),
                  "categories": [{"id": k, "name": B.node_name(k, "en"), "ru": nodes[k]["title"]} for k in ids]}
                 for title, ids in B.load_groups()]
     elif name == "category_products":
@@ -219,56 +224,28 @@ def run_tool(name, args, s):
         items = B.load_products(nodes[args["category_id"]]["link"])[:20]
     elif name == "shop_info":
         topic = args["topic"]
-        if topic == "stores":
-            return stores_text("en")
-        if topic == "promotions":
-            return promos_text("en")
-        key = {"sizes": "sizes", "tailoring": "tailor", "made_to_measure": "mtm",
-               "delivery_returns": "delivery"}[topic]
-        return info_text(key, "en")
+        return do_action(topic if topic in ("stores", "promos") else "info:" + topic, "en")["text"]
     elif name == "send_request":
         return {"sent": send_request(args, s)}
     else:
         return {"error": "unknown tool"}
-    for item in items:  # remember what the AI saw, for product cards
-        s["seen"][brief(item)["id"]] = item
+    s["seen"].update((item_id(i), i) for i in items)  # remember what the AI saw, for product cards
     return [brief(i) for i in items]
 
 
 def send_request(a, s):
     kind = {"order": "t_order", "reserve": "t_reserve", "fitting": "t_fitting",
             "made_to_measure": "t_mtm"}.get(a["type"], "t_other")
-    store = ["Rio Mall", "Sayat-Nova Ave 8", "Dalma Garden Mall"].index(a["store"])
+    store = STORES["en"].index(a["store"])
     item = s["seen"].get(a["product_id"]) or (find_item(a["product_id"]) if a["product_id"] else None)
-    if sum(ch.isdigit() for ch in a["phone"]) < 6:
+    if not B.valid_phone(a["phone"]):
         return False
     key = (kind, store, a["product_id"], a["size"].strip(), re.sub(r"\D", "", a["phone"]))
-    if key in s.setdefault("sent_keys", set()):
+    if key in s["sent_keys"]:
         return True  # already sent in this chat
-    sent = False
-    for admin in B.load_admins():
-        al = B.lang_of(admin) or "en"
-        lines = [f"<b>💬 {B.o('new_request', al)}</b> (website chat)", f"{B.o('f_type', al)}: {B.o(kind, al)}"]
-        if item:
-            lines.append(f"{B.o('f_item', al)}: {html.escape(item['name'])}"
-                         + (f" ({html.escape(item['color'])})" if item["color"] else "")
-                         + f" – {item['price']}\n{item['url']}")
-        if a["size"].strip():
-            lines.append(f"{B.o('f_size', al)}: {html.escape(a['size'][:40])}")
-        if a["message"].strip():
-            lines.append(f"{B.o('f_note', al)}: {html.escape(a['message'][:400])}")
-        lines += [f"{B.o('f_store', al)}: {B.STORES[al][store]}",
-                  f"{B.o('f_client', al)}: {html.escape(a['name'][:60])}",
-                  f"{B.o('f_phone', al)}: {html.escape(a['phone'][:30])}"]
-        text = "\n".join(lines)
-        if PREVIEW:
-            print("Chat request (preview, not sent):\n" + text)
-            sent = True
-            continue
-        ok = bool(item and item["photo"] and B.call("sendPhoto", {
-            "chat_id": admin, "photo": item["photo"], "caption": text, "parse_mode": "HTML"}))
-        sent = sent or ok or bool(B.call("sendMessage", {"chat_id": admin, "text": text, "parse_mode": "HTML"}))
-    print("Chat: request sent" if sent else "Chat: request NOT sent")
+    fields = [(k, a[f].strip()[:n]) for k, f, n in (("f_size", "size", 40), ("f_note", "message", 400))
+              if a[f].strip()]
+    sent = B.notify_admins(kind, item, store, fields, a["name"][:60], a["phone"][:30], " (website chat)")
     if sent:
         s["sent_keys"].add(key)
     return sent
@@ -276,7 +253,7 @@ def send_request(a, s):
 
 def call_model(s, **extra):
     return client.beta.messages.create(
-        model=MODEL, max_tokens=8000, system=SYSTEM, tools=TOOLS, messages=s["messages"],
+        model=MODEL, max_tokens=3000, system=SYSTEM, tools=TOOLS, messages=s["messages"],
         output_config={"effort": "low"},          # short shop chats don't need deep thinking
         cache_control={"type": "ephemeral"},       # caches tools + system + earlier turns
         betas=["server-side-fallback-2026-07-01"], fallbacks="default", **extra)
@@ -290,7 +267,7 @@ def tool_result(block, s):
     except Exception as e:
         print("Chat tool error:", block.name, type(e).__name__, e)
         return {"type": "tool_result", "tool_use_id": block.id, "is_error": True,
-                "content": "The shop's site did not respond. Answer without it or suggest calling 8248."}
+                "content": "This tool failed. Answer without it or suggest calling the hotline 8248."}
 
 
 def ask_ai(s, text, lang):
@@ -308,35 +285,27 @@ def ask_ai(s, text, lang):
     if r.stop_reason == "refusal":
         return {"text": t("error", lang)}
     reply = "".join(b.text for b in r.content if b.type == "text").strip()
-    products, buttons = [], []
-    m = re.search(r"^\s*OPTIONS:\s*(.+)$", reply, re.M)
-    if m:
-        reply = (reply[:m.start()] + reply[m.end():]).strip()
-        buttons = [{"label": o.strip()[:40], "say": o.strip()[:120]} for o in m.group(1).split("|") if o.strip()][:3]
-    m = re.search(r"^\s*SHOW:\s*(.+)$", reply, re.M)
-    if m:
-        reply = (reply[:m.start()] + reply[m.end():]).strip()
-        for pid in [x.strip() for x in m.group(1).split(",")][:6]:
-            item = s["seen"].get(pid) or find_item(pid)
-            if item:
-                products.append(card(item))
-    return {"text": reply, "products": products, "buttons": buttons + [{"label": t("menu", lang), "action": "menu"}]}
+    reply, options = pop_line(reply, "OPTIONS")
+    reply, show = pop_line(reply, "SHOW")
+    buttons = [{"label": o.strip()[:40], "say": o.strip()[:120]} for o in options.split("|") if o.strip()][:3]
+    items = [s["seen"].get(pid) or find_item(pid) for pid in [x.strip() for x in show.split(",")][:6]]
+    return {"text": reply, "products": [card(i) for i in items if i], "buttons": buttons + menu_btn(lang)}
+
+
+def pop_line(reply, tag):
+    """Cut the "TAG: ..." line out of the reply → (reply, its value or "")."""
+    m = re.search(rf"^\s*{tag}:\s*(.+)$", reply, re.M)
+    return ((reply[:m.start()] + reply[m.end():]).strip(), m.group(1)) if m else (reply, "")
 
 
 def chat(body, ip):
     """POST /chat: {"session", "lang", "action"} for buttons or {"session", "lang", "message"} for AI."""
     lang = body.get("lang") if body.get("lang") in LANGS else "en"
+    global last_cleanup
     now = time.time()
-    menu = [{"label": t("menu", lang), "action": "menu"}]
-    with lock:
-        for k in [k for k, v in sessions.items() if now - v["time"] > SESSION_HOURS * 3600]:
-            del sessions[k]
-        for k in [k for k, v in hits.items() if not v or now - v[-1] > 3600]:
-            del hits[k]
-        sid = body.get("session") if body.get("session") in sessions else secrets.token_urlsafe(16)
-        s = sessions.setdefault(sid, {"messages": [], "seen": {}, "time": now, "turns": 0, "busy": False})
-        s["time"] = now
-    if body.get("action"):
+    menu = menu_btn(lang)
+    sid = body.get("session")
+    if body.get("action"):  # buttons need no session; keep the visitor's chat as it is
         try:
             return {"session": sid, **do_action(str(body["action"])[:40], lang)}
         except Exception as e:  # e.g. henderson.am timed out: keep the chat, offer the menu
@@ -347,6 +316,18 @@ def chat(body, ip):
         return {"session": sid, "text": ""}
     if not client:
         return {"session": sid, "text": t("offline", lang), "buttons": menu_buttons(lang)}
+    with lock:
+        if now - last_cleanup > 60:
+            last_cleanup = now
+            for k in [k for k, v in sessions.items() if now - v["time"] > SESSION_HOURS * 3600]:
+                del sessions[k]
+            for k in [k for k, v in hits.items() if not v or now - v[-1] > 3600]:
+                del hits[k]
+        if sid not in sessions:
+            sid = secrets.token_urlsafe(16)
+        s = sessions.setdefault(sid, {"messages": [], "seen": {}, "sent_keys": set(), "time": now,
+                                      "turns": 0, "busy": False})
+        s["time"] = now
     with lock:
         hits[ip] = [x for x in hits.get(ip, []) if now - x < 3600]
         if len(hits[ip]) >= LIMIT_IP_HOUR or s["busy"]:
@@ -381,14 +362,14 @@ ICONS = {  # simple line icons (website rule: SVG icons, never emoji)
 
 WIDGET_JS = r"""(function(){
 if (window.__hendersonChat) return; window.__hendersonChat = 1;
-var API = %(api)s, T = %(texts)s, ICONS = %(icons)s, LOGO = %(logo)s;
+var API = %(api)s, T = %(texts)s, NAMES = %(names)s, ICONS = %(icons)s, LOGO = %(logo)s;
 // language: the visitor's earlier choice, else their browser/phone language, else the page's (henderson.am is Russian)
 var lang = null; try { lang = localStorage.getItem('hchat_lang'); } catch (e) {}
 if (!T[lang]) { lang = null; (navigator.languages || [navigator.language || '']).some(function(l){
   l = (l || '').slice(0,2).toLowerCase(); if (l === 'am') l = 'hy'; if (T[l]) { lang = l; return true; } }); }
 if (!lang) { lang = (document.documentElement.lang || '').slice(0,2).toLowerCase(); if (!T[lang]) lang = 'ru'; }
 var sid = null; try { sid = localStorage.getItem('hchat'); } catch (e) {}
-function svg(p, cls){ return '<svg class="' + (cls || 'i') + '" viewBox="' + (cls === 'logo' || cls === 'mono' ? '0 0 40 41' : '0 0 24 24') + '" aria-hidden="true">' + p + '</svg>'; }
+function svg(p, cls){ return '<svg class="' + (cls || 'i') + '" viewBox="' + (cls === 'logo' ? '0 0 40 41' : '0 0 24 24') + '" aria-hidden="true">' + p + '</svg>'; }
 var host = document.createElement('div'); host.style.cssText = 'position:fixed;right:20px;bottom:20px;z-index:2147483000';
 document.body.appendChild(host);
 var root = host.attachShadow({mode: 'open'});
@@ -404,8 +385,6 @@ root.innerHTML = '<style>%(css)s</style>' +
  '<footer><a target="_blank" rel="noopener"></a></footer></section>';
 var $ = function(s){ return root.querySelector(s); };
 var panel = $('.panel'), log = $('.log'), btns = $('.btns'), input = $('input');
-var chosen = false; try { chosen = !!localStorage.getItem('hchat_lang'); } catch (e) {}
-var NAMES = {en: 'English', ru: 'Русский', hy: 'Հայերեն'};
 function texts(){ var L = T[lang]; host.setAttribute('data-lang', lang); $('.lb').textContent = lang.toUpperCase(); $('.fab span').textContent = L.open; $('.fab').setAttribute('aria-label', L.open);
   $('.ttl strong').textContent = 'HENDERSON'; panel.setAttribute('aria-label', L.title);
   input.placeholder = L.placeholder; $('.go').textContent = L.send; $('.x').setAttribute('aria-label', L.close);
@@ -470,23 +449,21 @@ $('form').onsubmit = function(e){ e.preventDefault(); var v = input.value.trim()
 })();"""
 
 WIDGET_CSS = (  # Henderson look: navy on white, near-square corners, letter-spaced uppercase labels
-    ":host{all:initial;font:15px/1.45 -apple-system,BlinkMacSystemFont,'Helvetica Neue',Arial,'Noto Sans Armenian',sans-serif;color:#111316}"
-    "*{box-sizing:border-box}button,input,select{font:inherit;color:inherit}button{cursor:pointer}"
+    ":host{all:initial;--navy:#15284B;--navy-dk:#0e1c36;font:15px/1.45 -apple-system,BlinkMacSystemFont,'Helvetica Neue',Arial,'Noto Sans Armenian',sans-serif;color:#111316}"
+    "*{box-sizing:border-box}button,input{font:inherit;color:inherit}button{cursor:pointer}"
     ".i{width:17px;height:17px;fill:none;stroke:currentColor;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round;flex:none}"
-    ".up{text-transform:uppercase;letter-spacing:.12em}"
-    ".fab{display:flex;gap:10px;align-items:center;background:#15284B;color:#fff;border:0;border-radius:2px;padding:13px 18px;"
+    ".fab{display:flex;gap:10px;align-items:center;background:var(--navy);color:#fff;border:0;border-radius:2px;padding:13px 18px;"
     "box-shadow:0 6px 18px rgba(21,40,75,.25);font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:.14em}"
-    ".fab:hover{background:#0e1c36}"
+    ".fab:hover{background:var(--navy-dk)}"
     ".panel{width:min(440px,calc(100vw - 24px));height:min(640px,calc(100vh - 40px));background:#ffffff;border:1px solid #c9c4ba;border-radius:4px;"
-    "display:flex;flex-direction:column;box-shadow:0 12px 36px rgba(0,0,0,.18);overflow:hidden}"
+    "display:flex;flex-direction:column;box-shadow:0 12px 36px rgba(0,0,0,.18);overflow:hidden;position:relative}"
     ".panel[hidden],.fab[hidden]{display:none}"
-    "header{display:flex;gap:10px;align-items:center;background:#15284B;color:#fff;padding:9px 10px 9px 14px}"
+    "header{display:flex;gap:10px;align-items:center;background:var(--navy);color:#fff;padding:9px 10px 9px 14px}"
     ".logo{width:22px;height:23px;fill:#fff;flex:none}.ttl{flex:1;min-width:0}"
     ".ttl strong{font-weight:600;font-size:13px;letter-spacing:.24em}"
     ".lb{background:transparent;color:#fff;border:1px solid rgba(255,255,255,.45);border-radius:2px;padding:3px 8px;font-size:11.5px;font-weight:600;letter-spacing:.1em}"
     ".lb:hover{background:rgba(255,255,255,.15)}"
-    ".panel{position:relative}"
-    ".lmenu{position:absolute;top:var(--hh,45px);right:8px;z-index:3;background:#15284B;border-radius:0 0 6px 6px;"
+    ".lmenu{position:absolute;top:var(--hh,45px);right:8px;z-index:3;background:var(--navy);border-radius:0 0 6px 6px;"
     "box-shadow:0 14px 28px rgba(0,0,0,.24);display:flex;flex-direction:column;width:168px;padding:3px 0;overflow:hidden}"
     ".lmenu[hidden]{display:none}"
     ".lmenu button{display:flex;align-items:center;gap:8px;background:transparent;border:0;padding:9px 14px;"
@@ -501,7 +478,7 @@ WIDGET_CSS = (  # Henderson look: navy on white, near-square corners, letter-spa
     ".log{flex:1;overflow:auto;padding:16px 14px 8px;display:flex;flex-direction:column;gap:10px}.log>*{flex-shrink:0}"
     ".msg{max-width:86%;padding:9px 12px;white-space:pre-wrap;word-wrap:break-word;font-size:14.5px;border-radius:3px}"
     ".bot{background:#f0f1f4;border:1px solid #f0f1f4;align-self:flex-start}"
-    ".me{background:#15284B;color:#fff;align-self:flex-end}"
+    ".me{background:var(--navy);color:#fff;align-self:flex-end}"
     ".wait{color:#4f535a;font-style:italic}"
     ".cards{display:flex;gap:10px;overflow-x:auto;padding:2px 2px 6px;scroll-snap-type:x mandatory}"
     ".card{flex:0 0 150px;background:#fff;border:1px solid #c9c4ba;border-radius:2px;overflow:hidden;scroll-snap-align:start;display:flex;flex-direction:column}"
@@ -509,28 +486,27 @@ WIDGET_CSS = (  # Henderson look: navy on white, near-square corners, letter-spa
     ".card .b{padding:8px 9px 9px;display:flex;flex-direction:column;flex:1;font-size:12.5px}"
     ".card .n{color:#111316;text-decoration:none;font-weight:500;line-height:1.3;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}"
     ".card .n:hover{text-decoration:underline}.card .c{color:#4f535a;font-size:11.5px;margin-top:2px;text-transform:uppercase;letter-spacing:.06em}"
-    ".card .p{color:#15284B;font-weight:700;font-size:14px;margin-top:4px}"
+    ".card .p{color:var(--navy);font-weight:700;font-size:14px;margin-top:4px}"
     ".card .a{color:#4f535a;font-size:11px}"
-    ".card .r{border:0;background:#15284B;color:#fff;font-size:10.5px;font-weight:600;text-transform:uppercase;letter-spacing:.1em;"
-    "border-radius:2px;padding:8px 4px;margin-top:8px}.card .r:hover{background:#0e1c36}"
+    ".card .r{border:0;background:var(--navy);color:#fff;font-size:10.5px;font-weight:600;text-transform:uppercase;letter-spacing:.1em;"
+    "border-radius:2px;padding:8px 4px;margin-top:8px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.card .r:hover{background:var(--navy-dk)}"
     ".btns{display:flex;flex-wrap:nowrap;gap:6px;padding:6px 14px 8px;overflow-x:auto;scrollbar-width:thin;flex:none}"
     ".btns:empty{display:none}"
-    ".btns button{flex:none;white-space:nowrap;display:flex;gap:6px;align-items:center;background:#fff;border:1px solid #15284B;"
-    "border-radius:2px;padding:6px 10px;color:#15284B;font-size:13px}"
-    ".btns button .i{width:15px;height:15px}.btns button:hover{background:#15284B;color:#fff}"
-    ".btns button.say{background:#dfe5f1;border-color:#15284B}"
+    ".btns button{flex:none;white-space:nowrap;display:flex;gap:6px;align-items:center;background:#fff;border:1px solid var(--navy);"
+    "border-radius:2px;padding:6px 10px;color:var(--navy);font-size:13px}"
+    ".btns button .i{width:15px;height:15px}.btns button:hover{background:var(--navy);color:#fff}"
+    ".btns button.say{background:#dfe5f1;border-color:var(--navy)}"
     ".btns.tiles{display:grid;grid-template-columns:1fr 1fr;overflow:visible}"
     ".btns.tiles button{white-space:nowrap;padding:11px 12px;text-align:left;font-size:11.5px;font-weight:600;text-transform:uppercase;letter-spacing:.05em}"
     "form{display:flex;gap:8px;padding:10px 12px;border-top:1px solid #c9c4ba;background:#fff}"
     "form input{flex:1;min-width:0;border:1px solid #a9a397;border-radius:2px;padding:10px 12px;background:#fff}"
-    "form input:focus{outline:none;border-color:#15284B;box-shadow:0 0 0 1px #15284B}form input::placeholder{color:#6b6f76}"
-    ".go{background:#15284B;color:#fff;border:0;border-radius:2px;padding:0 16px;font-size:11.5px;font-weight:600;text-transform:uppercase;letter-spacing:.12em}.go:hover{background:#0e1c36}.go:disabled{opacity:.6}"
+    "form input:focus{outline:none;border-color:var(--navy);box-shadow:0 0 0 1px var(--navy)}form input::placeholder{color:#6b6f76}"
+    ".go{background:var(--navy);color:#fff;border:0;border-radius:2px;padding:0 16px;font-size:11.5px;font-weight:600;text-transform:uppercase;letter-spacing:.12em}.go:hover{background:var(--navy-dk)}.go:disabled{opacity:.6}"
     "footer{padding:0 12px 8px;background:#fff;font-size:11px;text-align:right}footer a{color:#4f535a}"
     ":focus-visible{outline:2px solid #3d5a99;outline-offset:2px}"
     # Armenian capitals are hard to read letter-spaced: normal case there
     ":host([data-lang=hy]) .fab,:host([data-lang=hy]) .go,:host([data-lang=hy]) .card .r,:host([data-lang=hy]) .btns.tiles button,"
     ":host([data-lang=hy]) .card .c{text-transform:none;letter-spacing:0;font-size:13px}"
-    ".card .r{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}"
     "@media (max-width:480px){.panel{height:calc(100vh - 32px)}}"
 )
 
@@ -546,28 +522,23 @@ LOGO_PATHS = ('<polygon points="27.2,27.5 23.1,27.5 23.1,21.9 16.9,21.9 16.9,27.
               'l3.2,3.2L33,23.6l0.8,0.8C35.1,25.6,35.9,27.4,35.9,29.3L35.9,29.3z"/>')
 
 
-WATERMARK = os.environ.get("CHAT_WATERMARK", "single")  # "pattern" (many small logos) or "single"
-
-
-def watermark_css():
-    """Faint H monogram behind the chat: one large logo, or a staggered pattern of small ones."""
-    if WATERMARK == "single":
-        svg = ('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 40 41"><g fill="#15284B" fill-opacity="0.045">'
-               + LOGO_PATHS + "</g></svg>")
-        return (".log{background:url(data:image/svg+xml," + urllib.parse.quote(svg) + ") no-repeat 50% 85%/150px}"
-                ".log.chatting{background-position:50% 62%}")  # a bit higher once the chat has started
-    # 96x96 tile with two small logos, offset like a monogram fabric
-    logo = '<g fill="#15284B" fill-opacity="0.05" transform="translate({x},{y}) scale(0.6)">' + LOGO_PATHS + "</g>"
-    svg = ('<svg xmlns="http://www.w3.org/2000/svg" width="96" height="96" viewBox="0 0 96 96">'
-           + logo.format(x=10, y=10) + logo.format(x=58, y=58) + "</svg>")
-    return ".log{background:url(data:image/svg+xml," + urllib.parse.quote(svg) + ") repeat 0 0/96px 96px}"
+# One faint H monogram behind the chat, a bit higher once the chat has started
+WATERMARK_CSS = (".log{background:url(data:image/svg+xml," + urllib.parse.quote(
+    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 40 41"><g fill="#15284B" fill-opacity="0.045">'
+    + LOGO_PATHS + "</g></svg>") + ") no-repeat 50% 85%/150px}.log.chatting{background-position:50% 62%}")
+_widgets = {}  # base URL -> (gzipped body, plain body, etag)
 
 
 def widget_js(base):
-    texts = {lang: {k: v.get(lang) or v["en"] for k, v in WT.items()} for lang in LANGS}
-    return WIDGET_JS % {"api": json.dumps(base + "/chat"), "texts": json.dumps(texts, ensure_ascii=False),
-                        "icons": json.dumps(ICONS), "logo": json.dumps(LOGO_PATHS),
-                        "css": (WIDGET_CSS + watermark_css()).replace("'", "\\'")}
+    """Built once per server address: (plain bytes, gzipped bytes, etag)."""
+    if base not in _widgets:
+        texts = {lang: {k: t(k, lang) for k in WT} for lang in LANGS}
+        body = (WIDGET_JS % {"api": json.dumps(base + "/chat"), "texts": json.dumps(texts, ensure_ascii=False),
+                             "names": json.dumps(LANGS, ensure_ascii=False), "icons": json.dumps(ICONS),
+                             "logo": json.dumps(LOGO_PATHS),
+                             "css": (WIDGET_CSS + WATERMARK_CSS).replace("'", "\\'")}).encode()
+        _widgets[base] = (body, gzip.compress(body), '"' + hashlib.sha1(body).hexdigest()[:16] + '"')
+    return _widgets[base]
 
 
 def privacy_page(lang):
@@ -593,9 +564,11 @@ class Handler(BaseHTTPRequestHandler):
         proto = self.headers.get("X-Forwarded-Proto", "http")
         return f"{proto}://{self.headers.get('Host', 'localhost')}"
 
-    def send(self, status, body, ctype="text/html; charset=utf-8", cache="no-store"):
+    def send(self, status, body, ctype="text/html; charset=utf-8", cache="no-store", headers=()):
         data = body.encode() if isinstance(body, str) else body
         self.send_response(status)
+        for k, v in headers:
+            self.send_header(k, v)
         origin = self.headers.get("Origin", "")
         if origin in ORIGINS or origin == self.base() or re.fullmatch(r"http://(localhost|127\.0\.0\.1)(:\d+)?", origin):
             self.send_header("Access-Control-Allow-Origin", origin)
@@ -617,7 +590,13 @@ class Handler(BaseHTTPRequestHandler):
         lang = (urllib.parse.parse_qs(url.query).get("lang", ["en"])[0])
         lang = lang if lang in LANGS else "en"
         if url.path == "/widget.js":
-            return self.send(200, widget_js(self.base()), "text/javascript; charset=utf-8", "public, max-age=600")
+            body, zipped, etag = widget_js(self.base())
+            if self.headers.get("If-None-Match") == etag:
+                return self.send(304, b"", cache="public, max-age=600", headers=[("ETag", etag)])
+            headers = [("ETag", etag), ("Vary", "Accept-Encoding")]
+            if "gzip" in self.headers.get("Accept-Encoding", ""):
+                body, headers = zipped, headers + [("Content-Encoding", "gzip")]
+            return self.send(200, body, "text/javascript; charset=utf-8", "public, max-age=600", headers)
         if url.path == "/privacy":
             return self.send(200, privacy_page(lang))
         if url.path == "/":
@@ -635,7 +614,7 @@ class Handler(BaseHTTPRequestHandler):
             result = chat(body if isinstance(body, dict) else {}, ip)
         except Exception as e:
             print("Chat error:", type(e).__name__, e)
-            result = {"session": None, "text": t("error", "en"), "buttons": [{"label": t("menu", "en"), "action": "menu"}]}
+            result = {"session": None, "text": t("error", "en"), "buttons": menu_btn("en")}
         self.send(200, json.dumps(result, ensure_ascii=False), "application/json; charset=utf-8")
 
 
@@ -648,5 +627,6 @@ def serve(bot_module, port):
 
 if __name__ == "__main__":  # preview: widget only, no Telegram polling
     import bot
+    bot.DRY_RUN = PREVIEW
     threading.Thread(target=bot.index_loop, daemon=True).start()
     serve(bot, int(os.environ.get("PORT", "8081")))

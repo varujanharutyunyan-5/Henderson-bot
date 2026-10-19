@@ -115,7 +115,12 @@ def fetch(url):
     hit = _cache.get(url)
     if hit and time.time() - hit[0] < CACHE_SECONDS:
         return hit[1]
-    page = fetch_raw(url)
+    try:
+        page = fetch_raw(url)
+    except Exception:
+        if hit:  # the site is down or slow: an older copy is better than an error
+            return hit[1]
+        raise
     _cache[url] = (time.time(), page)
     return page
 
@@ -295,8 +300,13 @@ def t(key, lang):
     return UI[key].get(lang) or UI[key]["en"]
 
 
+def group_label(title, lang):
+    """Section name without its icon (the website uses its own icons)."""
+    return title if lang == "en" else GROUP_NAMES.get(title, {}).get(lang, title)
+
+
 def group_name(title, lang):
-    name = title if lang == "en" else GROUP_NAMES.get(title, {}).get(lang, title)
+    name = group_label(title, lang)
     return f"{GROUP_ICONS[title]} {name}" if title in GROUP_ICONS else name
 
 
@@ -453,19 +463,27 @@ def load_promos():
     return promos
 
 
-def send_promos(chat_id, lang):
+def current_promos(lang):
+    """[(name in lang, valid-until date)], or [] when the offers page is unavailable."""
     try:
         promos = load_promos()
     except Exception as e:
         print("Promotions page unavailable:", e)
-        promos = []
+        return []
+    out = []
+    for slug, title_ru, until in promos:
+        names = PROMO_NAMES.get(slug)
+        out.append((title_ru if lang == "ru" or not names else names[0 if lang == "en" else 1], until))
+    return out
+
+
+def send_promos(chat_id, lang):
+    promos = current_promos(lang)
     if not promos:  # site changed or unreachable: use the saved text
         send_info(chat_id, "promo", lang)
         return
     lines = [f"<b>{PROMO['title'][lang]}</b>", ""]
-    for slug, title_ru, until in promos:
-        names = PROMO_NAMES.get(slug)
-        name = title_ru if lang == "ru" or not names else names[0 if lang == "en" else 1]
+    for name, until in promos:
         lines += [f"🏷 {htmllib.escape(name)}", f"📅 {PROMO['until'][lang]} {until}", ""]
     lines.append(PROMO["note"][lang])
     post(chat_id, "sendMessage", {
@@ -809,37 +827,48 @@ def ask_phone(chat_id, lang, note):
         "resize_keyboard": True, "one_time_keyboard": True}})
 
 
-def finish_order(chat_id, lang, phone, user):
-    """Send the request to the admin chat and thank the customer."""
-    order = orders.pop(chat_id)
+DRY_RUN = False  # chat preview on the Mac: print requests instead of sending them
+
+
+def valid_phone(phone):
+    return sum(ch.isdigit() for ch in phone) >= 6
+
+
+def notify_admins(kind, item, store, fields, name, phone, source=""):
+    """Send a request to every admin in their language. fields = [(label key, text)]. True if any got it."""
     sent = False
     for admin in load_admins():
         al = lang_of(admin) or "en"
-        item = order["item"]
-        name = user_name(user)
-        lines = [f"<b>{o('new_request', al)}</b>",
-                 f"{o('f_type', al)}: {o(order['type'], al)}"]
+        lines = [f"<b>{o('new_request', al)}</b>{source}", f"{o('f_type', al)}: {o(kind, al)}"]
         if item:
             lines.append(f"{o('f_item', al)}: {htmllib.escape(item['name'])}"
                          + (f" ({htmllib.escape(item['color'])})" if item["color"] else "")
                          + f" – {item['price']}\n{item['url']}")
-        if order["note"]:
-            label = o("f_size", al) if item else o("f_note", al)
-            lines.append(f"{label}: {htmllib.escape(order['note'])}")
-        lines += [f"{o('f_store', al)}: {STORES[al][order['store']]}",
+        lines += [f"{o(key, al)}: {htmllib.escape(value)}" for key, value in fields]
+        lines += [f"{o('f_store', al)}: {STORES[al][store]}",
                   f"{o('f_client', al)}: {htmllib.escape(name)}",
                   f"{o('f_phone', al)}: {htmllib.escape(phone)}"]
         text = "\n".join(lines)
-        ok = False
-        if item and item["photo"]:
-            ok = bool(call("sendPhoto", {"chat_id": admin, "photo": item["photo"],
-                                         "caption": text, "parse_mode": "HTML"}))
-        if not ok:
-            ok = bool(call("sendMessage", {"chat_id": admin, "text": text, "parse_mode": "HTML"}))
+        if DRY_RUN:
+            print("Request (preview, not sent):\n" + text)
+            sent = True
+            continue
+        ok = bool(item and item["photo"] and call("sendPhoto", {
+            "chat_id": admin, "photo": item["photo"], "caption": text, "parse_mode": "HTML"}))
+        ok = ok or bool(call("sendMessage", {"chat_id": admin, "text": text, "parse_mode": "HTML"}))
         print("Order: request sent to an admin" if ok else "Order: sending to an admin FAILED")
         sent = sent or ok
     if not load_admins():
         print("No admin yet: send /admin to the bot to receive requests")
+    return sent
+
+
+def finish_order(chat_id, lang, phone, user):
+    """Send the request to the admin chat and thank the customer."""
+    order = orders.pop(chat_id)
+    item = order["item"]
+    note = [("f_size" if item else "f_note", order["note"])] if order["note"] else []
+    sent = notify_admins(order["type"], item, order["store"], note, user_name(user), phone)
 
     # Confirmation also removes the phone keyboard
     post(chat_id, "sendMessage", {"text": o("sent", lang) if sent else o("not_sent", lang),
@@ -868,7 +897,7 @@ def handle_order_message(chat_id, lang, msg):
         ask_phone(chat_id, lang, text)
     elif order["step"] == "phone":
         phone = (msg.get("contact") or {}).get("phone_number") or text
-        if sum(ch.isdigit() for ch in phone) >= 6:
+        if valid_phone(phone):
             print("Order: phone received")
             finish_order(chat_id, lang, phone, msg.get("from", {}))
         else:
