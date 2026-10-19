@@ -23,7 +23,7 @@ WT = {
     "menu":      {"en": "Main options", "ru": "Главное меню", "hy": "Գլխավոր մենյու"},
     "more":      {"en": "Show more", "ru": "Показать ещё", "hy": "Ցույց տալ ավելին"},
     "view":      {"en": "View", "ru": "Смотреть", "hy": "Դիտել"},
-    "reserve":   {"en": "Order or reserve", "ru": "Заказать или забронировать", "hy": "Պատվիրել կամ ամրագրել"},
+    "reserve":   {"en": "Order", "ru": "Заказать", "hy": "Պատվիրել"},
     "reserve_msg": {"en": "I'd like to order or reserve this item: {item}",
                     "ru": "Хочу заказать или забронировать этот товар: {item}",
                     "hy": "Ուզում եմ պատվիրել կամ ամրագրել այս ապրանքը՝ {item}"},

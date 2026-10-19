@@ -376,13 +376,13 @@ root.innerHTML = '<style>%(css)s</style>' +
 var $ = function(s){ return root.querySelector(s); };
 var panel = $('.panel'), log = $('.log'), btns = $('.btns'), input = $('input'), sel = $('select');
 sel.value = lang;
-function texts(){ var L = T[lang]; $('.fab span').textContent = L.open; $('.fab').setAttribute('aria-label', L.open);
+function texts(){ var L = T[lang]; host.setAttribute('data-lang', lang); $('.fab span').textContent = L.open; $('.fab').setAttribute('aria-label', L.open);
   $('.ttl strong').textContent = 'HENDERSON'; panel.setAttribute('aria-label', L.title);
   input.placeholder = L.placeholder; $('.go').textContent = L.send; $('.x').setAttribute('aria-label', L.close);
   $('footer a').textContent = L.privacy; $('footer a').href = API.replace(/\/chat$/, '/privacy?lang=' + lang); }
 texts();
 var mark = null;
-function scroll(){ if (mark && mark.parentNode) { log.scrollTop = Math.max(0, mark.offsetTop - 12); } else { log.scrollTop = log.scrollHeight; } }
+function scroll(){ if (mark && mark.parentNode) { log.scrollTop = Math.max(0, mark.offsetTop - log.offsetTop - 8); } else { log.scrollTop = log.scrollHeight; } }
 function add(cls, text){ if (!text) return; var d = document.createElement('div'); d.className = 'msg ' + cls;
   d.textContent = text; log.appendChild(d); scroll(); return d; }
 function cards(list){ if (!list || !list.length) return; var row = document.createElement('div'); row.className = 'cards';
@@ -409,9 +409,11 @@ function buttons(list){ btns.innerHTML = ''; list = list || [];
 function send(body){ body.session = sid; body.lang = lang; var w = add('bot wait', T[lang].typing);
   input.disabled = true; btns.innerHTML = '';
   fetch(API, {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body)})
-  .then(function(r){ return r.json(); }).then(function(d){ mark = w.previousElementSibling || null; w.remove(); sid = d.session;
+  .then(function(r){ return r.json(); }).then(function(d){ w.remove(); sid = d.session;
     try { sid ? localStorage.setItem('hchat', sid) : localStorage.removeItem('hchat'); } catch (e) {}
-    add('bot', d.text); cards(d.products); buttons(d.buttons); })
+    var start = log.children.length; mark = null;
+    add('bot', d.text); cards(d.products); buttons(d.buttons);
+    mark = log.children[start] || null; scroll(); })
   .catch(function(){ w.remove(); add('bot', T[lang].error); buttons([{label: T[lang].menu, action: 'menu'}]); })
   .then(function(){ input.disabled = false; input.focus(); }); }
 function say(text){ mark = null; add('me', text); send({message: text}); }
@@ -467,6 +469,10 @@ WIDGET_CSS = (  # Henderson look: navy on white, near-square corners, letter-spa
     ".go{background:#15284B;color:#fff;border:0;border-radius:2px;padding:0 16px;font-size:11.5px;font-weight:600;text-transform:uppercase;letter-spacing:.12em}.go:hover{background:#0e1c36}.go:disabled{opacity:.6}"
     "footer{padding:0 12px 8px;background:#fff;font-size:11px;text-align:right}footer a{color:#4f535a}"
     ":focus-visible{outline:2px solid #3d5a99;outline-offset:2px}"
+    # Armenian capitals are hard to read letter-spaced: normal case there
+    ":host([data-lang=hy]) .fab,:host([data-lang=hy]) .go,:host([data-lang=hy]) .card .r,:host([data-lang=hy]) .btns.tiles button,"
+    ":host([data-lang=hy]) .card .c{text-transform:none;letter-spacing:0;font-size:13px}"
+    ".card .r{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}"
     "@media (max-width:480px){.panel{height:calc(100vh - 32px)}}"
 )
 
@@ -482,11 +488,18 @@ LOGO_PATHS = ('<polygon points="27.2,27.5 23.1,27.5 23.1,21.9 16.9,21.9 16.9,27.
               'l3.2,3.2L33,23.6l0.8,0.8C35.1,25.6,35.9,27.4,35.9,29.3L35.9,29.3z"/>')
 
 
+def watermark():
+    """Data URL of the H monogram at ~4% opacity, for the chat background."""
+    svg = ('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 40 41"><g fill="#15284B" fill-opacity="0.045">'
+           + LOGO_PATHS + "</g></svg>")
+    return "data:image/svg+xml," + urllib.parse.quote(svg)
+
+
 def widget_js(base):
     texts = {lang: {k: v.get(lang) or v["en"] for k, v in WT.items()} for lang in LANGS}
     return WIDGET_JS % {"api": json.dumps(base + "/chat"), "texts": json.dumps(texts, ensure_ascii=False),
                         "icons": json.dumps(ICONS), "logo": json.dumps(LOGO_PATHS),
-                        "css": WIDGET_CSS.replace("'", "\\'")}
+                        "css": (WIDGET_CSS + ".log{background:url(" + watermark() + ") no-repeat 50% 58%/150px}").replace("'", "\\'")}
 
 
 def privacy_page(lang):
