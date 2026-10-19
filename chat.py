@@ -432,7 +432,7 @@ function showLang(){
       lang = code; try { localStorage.setItem('hchat_lang', lang); } catch (e) {}
       texts(); log.innerHTML = ''; send({action: 'menu'}); };
     m.appendChild(b); });
-  m.hidden = false; m.firstChild.focus(); }
+  m.style.setProperty('--hh', $('header').offsetHeight + 'px'); m.hidden = false; m.firstChild.focus(); }
 root.addEventListener('click', function(e){ var m = $('.lmenu');
   if (!m.hidden && !e.composedPath().some(function(n){ return n === m || n === $('.lb'); })) m.hidden = true; });
 function say(text){ mark = null; add('me', text); send({message: text}); }
@@ -461,13 +461,14 @@ WIDGET_CSS = (  # Henderson look: navy on white, near-square corners, letter-spa
     ".lb{background:transparent;color:#fff;border:1px solid rgba(255,255,255,.45);border-radius:2px;padding:3px 8px;font-size:11.5px;font-weight:600;letter-spacing:.1em}"
     ".lb:hover{background:rgba(255,255,255,.15)}"
     ".panel{position:relative}"
-    ".lmenu{position:absolute;top:44px;right:42px;z-index:3;background:#fff;border:1px solid #15284B;border-radius:2px;"
-    "box-shadow:0 8px 20px rgba(0,0,0,.15);display:flex;flex-direction:column;min-width:150px;padding:4px 0}"
+    ".lmenu{position:absolute;top:var(--hh,45px);right:0;z-index:3;background:#15284B;border-top:1px solid rgba(255,255,255,.18);"
+    "box-shadow:0 10px 22px rgba(0,0,0,.2);display:flex;flex-direction:column;min-width:170px;padding:4px 0}"
     ".lmenu[hidden]{display:none}"
-    ".lmenu button{display:flex;justify-content:space-between;align-items:center;gap:16px;background:#fff;border:0;"
-    "padding:9px 14px;font-size:14px;color:#111316;text-align:left}"
-    ".lmenu button small{font-size:10.5px;font-weight:600;letter-spacing:.12em;color:#4f535a}"
-    ".lmenu button:hover{background:#eef0f5}.lmenu button.on{background:#15284B;color:#fff}.lmenu button.on small{color:#fff}"
+    ".lmenu button{display:flex;justify-content:space-between;align-items:center;gap:16px;background:transparent;border:0;"
+    "padding:10px 16px;font-size:14px;color:#fff;text-align:left}"
+    ".lmenu button small{font-size:10.5px;font-weight:600;letter-spacing:.14em;opacity:.75}"
+    ".lmenu button:hover{background:rgba(255,255,255,.1)}.lmenu button.on{background:rgba(255,255,255,.16)}"
+    ".lmenu button.on small{opacity:1}"
     ".x{background:none;border:0;color:#fff;padding:4px;border-radius:2px;display:flex}.x:hover{background:rgba(255,255,255,.15)}"
     ".log{flex:1;overflow:auto;padding:16px 14px 8px;display:flex;flex-direction:column;gap:10px}.log>*{flex-shrink:0}"
     ".msg{max-width:86%;padding:9px 12px;white-space:pre-wrap;word-wrap:break-word;font-size:14.5px;border-radius:3px}"
