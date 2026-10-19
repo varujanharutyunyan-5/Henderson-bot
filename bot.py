@@ -174,8 +174,14 @@ def load_menu():
     return nodes
 
 
+_parsed = {}  # link -> (page, products): parse each downloaded page only once
+
+
 def load_products(link):
     page = fetch(SITE + link)
+    hit = _parsed.get(link)
+    if hit and hit[0] is page:
+        return hit[1]
     products = []
     for card in page.split('class="productCart"')[1:]:
         url = re.search(r'href="(/product/[^"]+)"', card)
@@ -192,6 +198,7 @@ def load_products(link):
                 "color": htmllib.unescape(color.group(1)).strip().lower() if color else "",
                 "url": SITE + url.group(1),
             })
+    _parsed[link] = (page, products)
     return products
 
 
@@ -221,9 +228,14 @@ GROUPS = [
 ]
 
 
+_groups = {"nodes": None, "groups": []}
+
+
 def load_groups():
-    """Turn GROUPS into [(title, [node ids])] using the current site menu."""
+    """Turn GROUPS into [(title, [node ids])] using the current site menu (rebuilt when the menu is)."""
     nodes = load_menu()
+    if _groups["nodes"] is nodes:
+        return _groups["groups"]
     by_link = {}
     for i, n in enumerate(nodes):
         by_link.setdefault(n["link"].rstrip("/"), i)
@@ -246,6 +258,7 @@ def load_groups():
              for k in n["children"] if nodes[k]["link"].rstrip("/") not in used]
     if other:
         groups.append(("Other", other))
+    _groups.update(nodes=nodes, groups=groups)
     return groups
 
 
