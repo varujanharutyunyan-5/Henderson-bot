@@ -496,7 +496,7 @@ def watermark_css():
     if WATERMARK == "single":
         svg = ('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 40 41"><g fill="#15284B" fill-opacity="0.045">'
                + LOGO_PATHS + "</g></svg>")
-        return ".log{background:url(data:image/svg+xml," + urllib.parse.quote(svg) + ") no-repeat 50% 50%/150px}"
+        return ".log{background:url(data:image/svg+xml," + urllib.parse.quote(svg) + ") no-repeat 50% 72%/150px}"
     # 96x96 tile with two small logos, offset like a monogram fabric
     logo = '<g fill="#15284B" fill-opacity="0.05" transform="translate({x},{y}) scale(0.6)">' + LOGO_PATHS + "</g>"
     svg = ('<svg xmlns="http://www.w3.org/2000/svg" width="96" height="96" viewBox="0 0 96 96">'
