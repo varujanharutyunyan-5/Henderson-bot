@@ -445,6 +445,13 @@ SEARCH_WORDS = {
     "գլխարկ": ["шапк", "кепк"], "ակնոց": ["очк"], "օծանելիք": ["парфюм", "туалетн"], "պիժամա": ["пижам"],
     "black": ["black"], "white": ["white"], "navy": ["navy"], "blue": ["blue", "navy"], "grey": ["grey"],
     "gray": ["grey"], "brown": ["brown"], "beige": ["beige"], "green": ["green", "olive"],
+    "red": ["red"], "burgundy": ["bordo", "burgundy"], "khaki": ["khaki"],
+    # colours in Russian (word stems: "черные", "черный" and "чёрная" all start with "черн") and Armenian
+    "черн": ["black"], "бел": ["white"], "син": ["navy", "blue"], "голуб": ["blue"], "сер": ["grey"],
+    "коричн": ["brown"], "беж": ["beige"], "зелен": ["green", "olive"], "красн": ["red"],
+    "бордо": ["bordo", "burgundy"], "хаки": ["khaki"],
+    "սև": ["black"], "սպիտակ": ["white"], "կապույտ": ["navy", "blue"], "մոխրագույն": ["grey"],
+    "շագանակագույն": ["brown"], "բեժ": ["beige"], "կանաչ": ["green", "olive"], "կարմիր": ["red"],
 }
 
 # ---------- live promotions ----------

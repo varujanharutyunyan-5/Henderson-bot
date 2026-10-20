@@ -408,7 +408,7 @@ def index_loop():
 
 def search_products(q):
     """Products matching every word of q (Russian, English or Armenian): name, colour or category."""
-    q = " ".join(q.lower().split())
+    q = " ".join(q.lower().replace("ё", "е").split())
     all_cats = [(n["link"].rstrip("/").split("/")[-1],
                  [n["title"].lower()] + [x.lower() for x in
                                          CATEGORY_NAMES.get(n["link"].rstrip("/").split("/")[-1], ())])
@@ -417,11 +417,15 @@ def search_products(q):
     def word_matcher(w):
         terms = {w}
         for word, stems in SEARCH_WORDS.items():
-            if w == word or w.rstrip("s") == word.rstrip("s") or (len(w) >= 4 and word.startswith(w)):
+            if (w == word or w.rstrip("s") == word.rstrip("s") or (len(w) >= 4 and word.startswith(w))
+                    or (not word.isascii() and len(word) >= 3 and w.startswith(word))):  # Russian endings
                 terms.update(stems)
         cats = {slug for slug, names in all_cats
                 if any(w == x or (len(w) >= 4 and (w in x or x.startswith(w))) for x in names)}
-        return lambda p: (any(term in p["name"].lower() or term == p["color"] for term in terms)
+        # a colour also matches its dark and light shades on the site ("dnavy", "lgrey")
+        return lambda p: (any(term in p["name"].lower().replace("ё", "е")
+                              or term in (p["color"], p["color"][1:] if p["color"][:1] in ("d", "l") else "")
+                              for term in terms)
                           or bool(p["cats"] & cats))
 
     # two-word phrases first ("bow tie", "gift card"), then single words
