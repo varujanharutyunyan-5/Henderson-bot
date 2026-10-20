@@ -33,16 +33,18 @@ ORIGINS = {o.strip() for o in os.environ.get(
 LIMIT_IP_HOUR = 40       # AI messages per visitor address per hour
 LIMIT_TURNS = 25         # AI messages per chat
 SESSION_HOURS = 3
+LIMIT_IP_MINUTE = 40     # all requests (buttons and searches too) per visitor address per minute
+LIMIT_SENT = 3           # requests to the store per chat
 PAGE = 8                 # product cards per page
 
 client = anthropic.Anthropic() if anthropic and os.environ.get("ANTHROPIC_API_KEY") else None
 EMOJI = re.compile("[\U0001F000-\U0001FAFF☀-➿⬀-⯿️‍⃣]+\\s*")
-sessions, hits, lock = {}, {}, threading.Lock()
+sessions, hits, recent, lock = {}, {}, {}, threading.Lock()
 last_cleanup = 0
 
 
 def plain(text):
-    return EMOJI.sub("", re.sub(r"</?(b|i|pre)>", "", text)).strip()
+    return html.unescape(EMOJI.sub("", re.sub(r"</?(b|i|pre)>", "", text))).strip()
 
 
 def t(key, lang):
@@ -90,8 +92,10 @@ def info_text(key, lang):
 
 def promos_text(lang):
     promos = B.current_promos(lang)
-    if not promos:
+    if promos is None:
         return info_text("promo", lang)
+    if not promos:
+        return plain(B.PROMO["none"][lang])
     return "\n".join(f"{name} ({B.PROMO['until'][lang]} {until})" for name, until in promos)
 
 
@@ -117,11 +121,11 @@ def do_action(action, lang):
         return {"buttons": [{"label": B.group_label(title, lang), "action": f"group:{gi}"}
                             for gi, (title, _) in enumerate(B.load_groups())] + back}
     if action.startswith("group:"):
-        _, ids = B.load_groups()[int(action[6:])]
+        _, ids = B.load_groups()[abs(int(action[6:]))]
         return {"buttons": [{"label": B.node_name(k, lang), "action": f"cat:{k}:0"} for k in ids] + back}
     if action.startswith("cat:"):
         _, node, page = action.split(":")
-        node, page = int(node), int(page)
+        node, page = abs(int(node)), abs(int(page))
         n = B.load_menu()[node]
         kids = [{"label": B.node_name(k, lang), "action": f"cat:{k}:0"} for k in n["children"]] if page == 0 else []
         items = B.load_products(n["link"])
@@ -243,6 +247,8 @@ def send_request(a, s):
     key = (kind, store, a["product_id"], a["size"].strip(), re.sub(r"\D", "", a["phone"]))
     if key in s["sent_keys"]:
         return True  # already sent in this chat
+    if len(s["sent_keys"]) >= LIMIT_SENT:
+        return {"error": "This chat already sent several requests. Ask the visitor to call the hotline 8248."}
     fields = [(k, a[f].strip()[:n]) for k, f, n in (("f_size", "size", 40), ("f_note", "message", 400))
               if a[f].strip()]
     sent = B.notify_admins(kind, item, store, fields, a["name"][:60], a["phone"][:30], " (website chat)")
@@ -253,7 +259,7 @@ def send_request(a, s):
 
 def call_model(s, **extra):
     return client.beta.messages.create(
-        model=MODEL, max_tokens=3000, system=SYSTEM, tools=TOOLS, messages=s["messages"],
+        model=MODEL, max_tokens=8000, system=SYSTEM, tools=TOOLS, messages=s["messages"],
         output_config={"effort": "low"},          # short shop chats don't need deep thinking
         cache_control={"type": "ephemeral"},       # caches tools + system + earlier turns
         betas=["server-side-fallback-2026-07-01"], fallbacks="default", **extra)
@@ -282,6 +288,8 @@ def ask_ai(s, text, lang):
             continue
         if r.stop_reason != "pause_turn":
             break
+    if r.stop_reason == "max_tokens" or any(b.type == "tool_use" for b in r.content):
+        raise RuntimeError("reply was cut off")  # chat() removes this turn so the history stays valid
     if r.stop_reason == "refusal":
         return {"text": t("error", lang)}
     reply = "".join(b.text for b in r.content if b.type == "text").strip()
@@ -293,19 +301,17 @@ def ask_ai(s, text, lang):
 
 
 def pop_line(reply, tag):
-    """Cut the "TAG: ..." line out of the reply → (reply, its value or "")."""
-    m = re.search(rf"^\s*{tag}:\s*(.+)$", reply, re.M)
-    return ((reply[:m.start()] + reply[m.end():]).strip(), m.group(1)) if m else (reply, "")
+    """Cut every "TAG: ..." line out of the reply → (reply, the first one's value or "")."""
+    pattern = rf"^[ \t]*{tag}:[ \t]*(.*)$"
+    values = [v.strip() for v in re.findall(pattern, reply, re.M) if v.strip()]
+    return re.sub(pattern + r"\n?", "", reply, flags=re.M).strip(), values[0] if values else ""
 
 
 def free_search(text, lang):
     """Without the AI: search the catalog with the bot's own search (costs nothing)."""
     if not B.index["items"]:
         return {"text": t("offline", lang), "buttons": menu_buttons(lang)}
-    items = B.search_products(text)
-    if not items:  # a sentence like "do you have black jeans?": keep only the words that find something
-        words = [w for w in re.findall(r"\w+", text.lower()) if len(w) >= 3 and B.search_products(w)]
-        items = B.search_products(" ".join(words)) if words else []
+    items = B.search_products(" ".join(re.findall(r"[\w-]+", text)))  # without "?" and commas
     if not items:
         return {"text": t("nothing", lang).replace("{q}", text[:60]),
                 "buttons": [{"label": t("catalog", lang), "action": "sections"}] + menu_btn(lang)}
@@ -314,52 +320,61 @@ def free_search(text, lang):
     return {"text": note, "products": [card(i) for i in items[:PAGE]], "buttons": menu_btn(lang)}
 
 
+def text_field(body, key, limit):
+    v = body.get(key)
+    return v.strip()[:limit] if isinstance(v, str) else ""
+
+
 def chat(body, ip):
     """POST /chat: {"session", "lang", "action"} for buttons or {"session", "lang", "message"} for AI."""
-    lang = body.get("lang") if body.get("lang") in LANGS else "en"
     global last_cleanup
+    lang = text_field(body, "lang", 2)
+    lang = lang if lang in LANGS else "en"
+    sid = text_field(body, "session", 40) or None
     now = time.time()
     menu = menu_btn(lang)
-    sid = body.get("session")
-    if body.get("action"):  # buttons need no session; keep the visitor's chat as it is
-        try:
-            return {"session": sid, **do_action(str(body["action"])[:40], lang)}
-        except Exception as e:  # e.g. henderson.am timed out: keep the chat, offer the menu
-            print("Chat button error:", type(e).__name__, e)
-            return {"session": sid, "text": t("error", lang), "buttons": menu}
-    text = str(body.get("message", "")).strip()[:500]
-    if not text:
-        return {"session": sid, "text": ""}
-    if not client:
-        return {"session": sid, **free_search(text, lang)}
     with lock:
         if now - last_cleanup > 60:
             last_cleanup = now
             for k in [k for k, v in sessions.items() if now - v["time"] > SESSION_HOURS * 3600]:
                 del sessions[k]
-            for k in [k for k, v in hits.items() if not v or now - v[-1] > 3600]:
-                del hits[k]
-        if sid not in sessions:
-            sid = secrets.token_urlsafe(16)
-        s = sessions.setdefault(sid, {"messages": [], "seen": {}, "sent_keys": set(), "time": now,
-                                      "turns": 0, "busy": False})
-        s["time"] = now
+            for table, age in ((hits, 3600), (recent, 60)):
+                for k in [k for k, v in table.items() if not v or now - v[-1] > age]:
+                    del table[k]
+        recent[ip] = [x for x in recent.get(ip, []) if now - x < 60] + [now]
+        if len(recent[ip]) > LIMIT_IP_MINUTE:
+            return {"session": sid, "text": t("busy", lang), "buttons": menu}
+    action = text_field(body, "action", 40)
+    if action:  # buttons need no session; keep the visitor's chat as it is
+        try:
+            return {"session": sid, **do_action(action, lang)}
+        except Exception as e:  # e.g. henderson.am timed out: keep the chat, offer the menu
+            print("Chat button error:", type(e).__name__, e)
+            return {"session": sid, "text": t("error", lang), "buttons": menu}
+    text = text_field(body, "message", 500)
+    if not text:
+        return {"session": sid, "text": ""}
+    if not client:
+        return {"session": sid, **free_search(text, lang)}
     with lock:
         hits[ip] = [x for x in hits.get(ip, []) if now - x < 3600]
-        if len(hits[ip]) >= LIMIT_IP_HOUR or s["busy"]:
+        s = sessions.get(sid)
+        if len(hits[ip]) >= LIMIT_IP_HOUR or (s and s["busy"]):
             return {"session": sid, "text": t("busy", lang), "buttons": menu}
-        if s["turns"] >= LIMIT_TURNS:
+        if s and s["turns"] >= LIMIT_TURNS:
             return {"session": sid, "text": t("new_chat", lang), "buttons": [{"label": t("restart", lang), "action": "reset"}]}
+        if not s:  # a session is made only for a message that will really be answered
+            sid = secrets.token_urlsafe(16)
+            s = sessions[sid] = {"messages": [], "seen": {}, "sent_keys": set(), "turns": 0, "busy": False}
         hits[ip].append(now)
-        s["turns"] += 1
-        s["busy"] = True
+        s.update(time=now, turns=s["turns"] + 1, busy=True)
+    start = len(s["messages"])
     try:
         return {"session": sid, **ask_ai(s, text, lang)}
-    except Exception as e:
+    except Exception as e:  # API error or cut-off reply: remove only this turn, keep the chat
         print("Chat AI error:", type(e).__name__, e)
-        with lock:  # drop the broken turn so the history stays valid
-            sessions.pop(sid, None)
-        return {"session": None, "text": t("error", lang), "buttons": menu}
+        del s["messages"][start:]
+        return {"session": sid, "text": t("error", lang), "buttons": menu}
     finally:
         s["busy"] = False
 
@@ -419,8 +434,9 @@ function cards(list){ if (!list || !list.length) return; var row = document.crea
     c.querySelector('.n').textContent = p.name; c.querySelector('.c').textContent = p.color || '';
     c.querySelector('.p').textContent = p.price; c.querySelector('.a').textContent = p.approx || '';
     var r = c.querySelector('.r'); r.textContent = T[lang].reserve;
-    r.onclick = AI ? function(){ say(T[lang].reserve_msg.replace('{item}', p.name + (p.color ? ' (' + p.color + ')' : '') + ', ' + p.price + ' [' + p.id + ']')); }
-      : function(){ mark = null; add('me', T[lang].reserve + ': ' + p.name); send({action: 'stores'}); };  // no AI: show the store phones
+    var what = p.name + (p.color ? ' (' + p.color + ')' : '') + ', ' + p.price;
+    r.onclick = AI ? function(){ say(T[lang].reserve_msg.replace('{item}', what + ' [' + p.id + ']'), T[lang].reserve_msg.replace('{item}', what)); }
+      : function(){ if (busy) return; mark = null; add('me', T[lang].reserve + ': ' + p.name); send({action: 'stores'}); };  // no AI: show the store phones
     row.appendChild(c); });
   log.appendChild(row); scroll(); }
 function buttons(list){ btns.innerHTML = ''; list = list || [];
@@ -429,19 +445,24 @@ function buttons(list){ btns.innerHTML = ''; list = list || [];
   list.forEach(function(b){ var x = document.createElement('button');
     x.innerHTML = (b.icon ? svg(ICONS[b.icon]) : '') + '<span></span>'; x.querySelector('span').textContent = b.label;
     if (b.say) x.className = 'say';
-    x.onclick = function(){ if (b.action === 'reset') { sid = null; log.innerHTML = ''; send({action: 'menu'}); }
+    x.onclick = function(){ if (busy) return; if (b.action === 'reset') { sid = null; log.innerHTML = ''; send({action: 'menu'}); }
       else if (b.say) { say(b.say); } else { mark = null; add('me', b.label); send({action: b.action}); } };
     btns.appendChild(x); }); }
-function send(body){ body.session = sid; body.lang = lang; var w = add('bot wait', T[lang].typing);
-  input.disabled = true; btns.innerHTML = '';
+var busy = false, gen = 0, desktop = window.matchMedia && matchMedia('(pointer: fine)').matches;
+function focusInput(){ if (desktop) input.focus(); }  // on phones the keyboard would cover the answer
+function send(body){ var my = ++gen;  // a language switch or new chat makes older replies stale
+  body.session = sid; body.lang = lang; var w = add('bot wait', T[lang].typing);
+  busy = true; input.disabled = true; btns.innerHTML = '';
   fetch(API, {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body)})
-  .then(function(r){ return r.json(); }).then(function(d){ w.remove(); sid = d.session;
+  .then(function(r){ return r.json(); }).then(function(d){ if (my !== gen) return; w.remove(); sid = d.session;
     try { sid ? localStorage.setItem('hchat', sid) : localStorage.removeItem('hchat'); } catch (e) {}
     var start = log.children.length; mark = null;
     add('bot', d.text); cards(d.products); buttons(d.buttons);
     mark = log.children[start] || null; scroll(); })
-  .catch(function(){ w.remove(); add('bot', T[lang].error); buttons([{label: T[lang].menu, action: 'menu'}]); })
-  .then(function(){ input.disabled = false; input.focus(); }); }
+  .catch(function(){ if (my !== gen) return; w.remove(); add('bot', T[lang].error);
+    if (body.message && !input.value) input.value = body.message;  // keep what the visitor typed
+    buttons([{label: T[lang].menu, action: 'menu'}]); })
+  .then(function(){ if (my !== gen) return; busy = false; input.disabled = false; focusInput(); }); }
 function showLang(){
   var m = $('.lmenu'); if (!m.hidden) { m.hidden = true; return; }
   m.innerHTML = '';
@@ -456,13 +477,13 @@ function showLang(){
   m.style.setProperty('--hh', $('header').offsetHeight + 'px'); m.hidden = false; m.firstChild.focus(); }
 root.addEventListener('click', function(e){ var m = $('.lmenu');
   if (!m.hidden && !e.composedPath().some(function(n){ return n === m || n === $('.lb'); })) m.hidden = true; });
-function say(text){ mark = null; add('me', text); send({message: text}); }
+function say(text, shown){ if (busy) return; mark = null; add('me', shown || text); send({message: text}); }
 $('.fab').onclick = function(){ panel.hidden = false; $('.fab').hidden = true;
-  if (!log.children.length) send({action: 'menu'}); input.focus(); };
+  if (!log.children.length) send({action: 'menu'}); focusInput(); };
 $('.lb').onclick = showLang;
 $('.x').onclick = function(){ panel.hidden = true; $('.fab').hidden = false; $('.fab').focus(); };
 root.addEventListener('keydown', function(e){ if (e.key === 'Escape' && !panel.hidden) $('.x').onclick(); });
-$('form').onsubmit = function(e){ e.preventDefault(); var v = input.value.trim(); if (!v) return; input.value = ''; say(v); };
+$('form').onsubmit = function(e){ e.preventDefault(); var v = input.value.trim(); if (!v || busy) return; input.value = ''; say(v); };
 })();"""
 
 WIDGET_CSS = (  # Henderson look: navy on white, near-square corners, letter-spaced uppercase labels
@@ -472,7 +493,7 @@ WIDGET_CSS = (  # Henderson look: navy on white, near-square corners, letter-spa
     ".fab{display:flex;gap:10px;align-items:center;background:var(--navy);color:#fff;border:0;border-radius:2px;padding:13px 18px;"
     "box-shadow:0 6px 18px rgba(21,40,75,.25);font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:.14em}"
     ".fab:hover{background:var(--navy-dk)}"
-    ".panel{width:min(440px,calc(100vw - 24px));height:min(640px,calc(100vh - 40px));background:#ffffff;border:1px solid #c9c4ba;border-radius:4px;"
+    ".panel{width:min(440px,calc(100vw - 24px));height:min(640px,calc(100vh - 40px));height:min(640px,calc(100dvh - 40px));background:#ffffff;border:1px solid #c9c4ba;border-radius:4px;"
     "display:flex;flex-direction:column;box-shadow:0 12px 36px rgba(0,0,0,.18);overflow:hidden;position:relative}"
     ".panel[hidden],.fab[hidden]{display:none}"
     "header{display:flex;gap:10px;align-items:center;background:var(--navy);color:#fff;padding:9px 10px 9px 14px}"
@@ -513,8 +534,8 @@ WIDGET_CSS = (  # Henderson look: navy on white, near-square corners, letter-spa
     "border-radius:2px;padding:6px 10px;color:var(--navy);font-size:13px}"
     ".btns button .i{width:15px;height:15px}.btns button:hover{background:var(--navy);color:#fff}"
     ".btns button.say{background:#dfe5f1;border-color:var(--navy)}"
-    ".btns.tiles{display:grid;grid-template-columns:1fr 1fr;overflow:visible}"
-    ".btns.tiles button{white-space:nowrap;padding:11px 12px;text-align:left;font-size:11.5px;font-weight:600;text-transform:uppercase;letter-spacing:.05em}"
+    ".btns.tiles{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);overflow:visible}"
+    ".btns.tiles button{white-space:normal;min-width:0;line-height:1.25;padding:11px 12px;text-align:left;font-size:11.5px;font-weight:600;text-transform:uppercase;letter-spacing:.05em}"
     "form{display:flex;gap:8px;padding:10px 12px;border-top:1px solid #c9c4ba;background:#fff}"
     "form input{flex:1;min-width:0;border:1px solid #a9a397;border-radius:2px;padding:10px 12px;background:#fff}"
     "form input:focus{outline:none;border-color:var(--navy);box-shadow:0 0 0 1px var(--navy)}form input::placeholder{color:#6b6f76}"
@@ -524,7 +545,7 @@ WIDGET_CSS = (  # Henderson look: navy on white, near-square corners, letter-spa
     # Armenian capitals are hard to read letter-spaced: normal case there
     ":host([data-lang=hy]) .fab,:host([data-lang=hy]) .go,:host([data-lang=hy]) .card .r,:host([data-lang=hy]) .btns.tiles button,"
     ":host([data-lang=hy]) .card .c{text-transform:none;letter-spacing:0;font-size:13px}"
-    "@media (max-width:480px){.panel{height:calc(100vh - 32px)}}"
+    "@media (max-width:480px){.panel{height:calc(100vh - 32px);height:calc(100dvh - 32px)}form input{font-size:16px}}"
 )
 
 LOGO_PATHS = ('<polygon points="27.2,27.5 23.1,27.5 23.1,21.9 16.9,21.9 16.9,27.5 12.8,27.5 12.8,13.1 16.9,13.1 '
@@ -549,6 +570,8 @@ _widgets = {}  # base URL -> (gzipped body, plain body, etag)
 def widget_js(base):
     """Built once per server address: (plain bytes, gzipped bytes, etag)."""
     if base not in _widgets:
+        if len(_widgets) > 20:  # odd Host headers must not fill the memory
+            _widgets.clear()
         texts = {lang: {k: t(k, lang) for k in WT} for lang in LANGS}
         body = (WIDGET_JS % {"api": json.dumps(base + "/chat"), "texts": json.dumps(texts, ensure_ascii=False),
                              "names": json.dumps(LANGS, ensure_ascii=False), "ai": json.dumps(bool(client)), "icons": json.dumps(ICONS),
@@ -574,6 +597,9 @@ after adding one line to the site:</p><pre style="background:#f4f2ee;padding:12p
 
 
 class Handler(BaseHTTPRequestHandler):
+    timeout = 20  # a client that stops sending mid-request can't hold a thread forever
+    head = False
+
     def log_message(self, *args):  # no visitor addresses or texts in the log
         pass
 
@@ -587,7 +613,8 @@ class Handler(BaseHTTPRequestHandler):
         for k, v in headers:
             self.send_header(k, v)
         origin = self.headers.get("Origin", "")
-        if origin in ORIGINS or origin == self.base() or re.fullmatch(r"http://(localhost|127\.0\.0\.1)(:\d+)?", origin):
+        if origin in ORIGINS or origin == self.base() or (
+                PREVIEW and re.fullmatch(r"http://(localhost|127\.0\.0\.1)(:\d+)?", origin)):
             self.send_header("Access-Control-Allow-Origin", origin)
             self.send_header("Vary", "Origin")
             self.send_header("Access-Control-Allow-Headers", "Content-Type")
@@ -597,10 +624,15 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Cache-Control", cache)
         self.send_header("X-Content-Type-Options", "nosniff")
         self.end_headers()
-        self.wfile.write(data)
+        if not self.head:
+            self.wfile.write(data)
 
     def do_OPTIONS(self):
         self.send(204, b"")
+
+    def do_HEAD(self):
+        self.head = True
+        self.do_GET()
 
     def do_GET(self):
         url = urllib.parse.urlsplit(self.path)
@@ -617,22 +649,34 @@ class Handler(BaseHTTPRequestHandler):
         if url.path == "/privacy":
             return self.send(200, privacy_page(lang))
         if url.path == "/":
-            return self.send(200, DEMO % (self.base(), int(time.time())))
+            return self.send(200, DEMO % (html.escape(self.base()), int(time.time())))
         self.send(404, "Not found", "text/plain")
 
     def do_POST(self):
         if urllib.parse.urlsplit(self.path).path != "/chat":
             return self.send(404, "Not found", "text/plain")
+        status, body = 200, {}
         try:
-            length = max(0, min(int(self.headers.get("Content-Length") or 0), 4000))
-            body = json.loads(self.rfile.read(length) or b"{}")
-            # Railway's proxy appends the real client address last; earlier values can be faked
-            ip = self.headers.get("X-Forwarded-For", self.client_address[0]).split(",")[-1].strip()
-            result = chat(body if isinstance(body, dict) else {}, ip)
-        except Exception as e:
-            print("Chat error:", type(e).__name__, e)
-            result = {"session": None, "text": t("error", "en"), "buttons": menu_btn("en")}
-        self.send(200, json.dumps(result, ensure_ascii=False), "application/json; charset=utf-8")
+            length = int(self.headers.get("Content-Length") or 0)
+            if not 0 <= length <= 4000:
+                status = 413
+            else:
+                body = json.loads(self.rfile.read(length) or b"{}")
+                body = body if isinstance(body, dict) else {}
+        except (ValueError, OSError):
+            status = 400
+        lang = text_field(body, "lang", 2) if text_field(body, "lang", 2) in LANGS else "en"
+        session = body.get("session") if isinstance(body.get("session"), str) else None
+        result = {"session": session, "text": t("error", lang), "buttons": menu_btn(lang)}
+        if status == 200:
+            try:
+                # Railway's proxy appends the real client address last; earlier values can be faked
+                ip = self.headers.get("X-Forwarded-For", self.client_address[0]).split(",")[-1].strip()
+                result = chat(body, ip)
+            except Exception as e:
+                print("Chat error:", type(e).__name__, e)
+                status = 500
+        self.send(status, json.dumps(result, ensure_ascii=False), "application/json; charset=utf-8")
 
 
 def serve(bot_module, port):

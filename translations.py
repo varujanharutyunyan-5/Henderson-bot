@@ -201,7 +201,7 @@ RU   INT   Chest  Waist
 # Info pages (HTML). Facts from henderson.am; size table and measuring tips are a general guide.
 INFO = {
     "sizes": {
-        "en": "<b>📏 Sizes & measuring</b>\n\n"
+        "en": "<b>📏 Sizes &amp; measuring</b>\n\n"
               "<b>How to measure yourself</b> (use a soft tape, over a thin shirt):\n"
               "• <b>Chest</b> – around the fullest part, under the arms\n"
               "• <b>Waist</b> – around your natural waistline\n"
@@ -233,7 +233,7 @@ INFO = {
               "Վստահ չե՞ք։ Ցանկացած խանութում ձեզ կչափեն 👌",
     },
     "tailor": {
-        "en": "<b>✂️ Tailoring & fitting</b>\n\n"
+        "en": "<b>✂️ Tailoring &amp; fitting</b>\n\n"
               "✅ <b>Free</b> within 30 days of purchase – with the receipt, item unworn, tags on.\n"
               "⏱ Ready in 24 hours to 7 days.\n\n"
               "<b>Services:</b>\n"
@@ -299,7 +299,7 @@ INFO = {
               "☎️ Թեժ գիծ՝ 8248 · +374 98 99 82 48",
     },
     "delivery": {
-        "en": "<b>🚚 Delivery & returns</b>\n\n"
+        "en": "<b>🚚 Delivery &amp; returns</b>\n\n"
               "<b>Delivery</b>\n• Free delivery of any order to Henderson stores in Armenia\n\n"
               "<b>Returns</b>\n• Within 30 days of purchase, at any store in Armenia\n"
               "• Item unworn, with tags and the receipt\n"
@@ -321,19 +321,13 @@ INFO = {
               "<b>Երաշխիք</b>\n• 24 ամիս արտոնյալ ակումբի անդամների համար (կոշիկներ – 1 տարի)\n"
               "• Թերություն առաջին 30 օրում – վերադարձ կամ փոխանակում",
     },
-    "promo": {
-        "en": "<b>🎁 Promotions</b>\n\n"
-              "🏷 Up to 25% off when you buy 3 or more items\n"
-              "👔 Oxford garment bag for 100 ֏\n\n"
-              "Offers change – check details in store.",
-        "ru": "<b>🎁 Акции</b>\n\n"
-              "🏷 Скидка до 25% при покупке от трёх изделий\n"
-              "👔 Чехол Oxford за 100 ֏\n\n"
-              "Акции меняются – уточняйте условия в салоне.",
-        "hy": "<b>🎁 Ակցիաներ</b>\n\n"
-              "🏷 Մինչև 25% զեղչ՝ 3 և ավելի ապրանք գնելիս\n"
-              "👔 Oxford պատյան՝ 100 ֏\n\n"
-              "Ակցիաները փոխվում են – մանրամասները ճշտեք խանութում։",
+    "promo": {  # shown when the offers page can't be loaded (no fixed offers here: they end)
+        "en": "<b>🎁 Promotions</b>\n\nWe couldn't load the current offers right now. "
+              "Please ask in store or call the hotline 8248.",
+        "ru": "<b>🎁 Акции</b>\n\nСейчас не удалось загрузить текущие акции. "
+              "Уточните в салоне или по горячей линии 8248.",
+        "hy": "<b>🎁 Ակցիաներ</b>\n\nՀիմա չհաջողվեց բեռնել ընթացիկ ակցիաները։ "
+              "Ճշտեք խանութում կամ թեժ գծով՝ 8248։",
     },
 }
 
@@ -443,14 +437,15 @@ SEARCH_WORDS = {
     "փողկապ": ["галстук"], "գուլպա": ["носк"], "պայուսակ": ["сумк", "портфел"], "ուսապարկ": ["рюкзак"],
     "ճամպրուկ": ["чемодан"], "դրամապանակ": ["кошел", "портмоне"], "շարֆ": ["шарф"], "ձեռնոց": ["перчат"],
     "գլխարկ": ["шапк", "кепк"], "ակնոց": ["очк"], "օծանելիք": ["парфюм", "туалетн"], "պիժամա": ["пижам"],
-    "black": ["black"], "white": ["white"], "navy": ["navy"], "blue": ["blue", "navy"], "grey": ["grey"],
+    "black": ["black"], "white": ["white", "ecru", "ivory"], "navy": ["navy"], "blue": ["blue", "navy"], "grey": ["grey"],
     "gray": ["grey"], "brown": ["brown"], "beige": ["beige"], "green": ["green", "olive"],
     "red": ["red"], "burgundy": ["bordo", "burgundy"], "khaki": ["khaki"],
+    "свитер": ["свитер", "пуловер", "джемпер"], "кофт": ["кофт", "кардиган", "джемпер"],
     # colours in Russian (word stems: "черные", "черный" and "чёрная" all start with "черн") and Armenian
-    "черн": ["black"], "бел": ["white"], "син": ["navy", "blue"], "голуб": ["blue"], "сер": ["grey"],
-    "коричн": ["brown"], "беж": ["beige"], "зелен": ["green", "olive"], "красн": ["red"],
+    "черн": ["black"], "бел": ["white", "ecru", "ivory"], "син": ["navy", "blue"], "голуб": ["blue"], "сер": ["grey"],
+    "коричнев": ["brown"], "бежев": ["beige"], "зелен": ["green", "olive"], "красн": ["red"],
     "бордо": ["bordo", "burgundy"], "хаки": ["khaki"],
-    "սև": ["black"], "սպիտակ": ["white"], "կապույտ": ["navy", "blue"], "մոխրագույն": ["grey"],
+    "սև": ["black"], "սպիտակ": ["white", "ecru", "ivory"], "կապույտ": ["navy", "blue"], "մոխրագույն": ["grey"],
     "շագանակագույն": ["brown"], "բեժ": ["beige"], "կանաչ": ["green", "olive"], "կարմիր": ["red"],
 }
 
@@ -460,6 +455,9 @@ PROMO = {
     "title": {"en": "🏷 Promotions", "ru": "🏷 Акции", "hy": "🏷 Ակցիաներ"},
     "until": {"en": "until", "ru": "до", "hy": "մինչև"},
     "note":  {"en": "Details in store.", "ru": "Подробности в салоне.", "hy": "Մանրամասները՝ խանութում։"},
+    "none":  {"en": "There are no promotions right now. New offers appear here as soon as they start.",
+              "ru": "Сейчас акций нет. Новые акции появятся здесь, как только начнутся.",
+              "hy": "Այժմ ակցիաներ չկան։ Նոր ակցիաները կհայտնվեն այստեղ, հենց սկսվեն։"},
 }
 
 # Known offers (by link on henderson.am/offers/) -> (English, Armenian). New offers show the site's Russian title.

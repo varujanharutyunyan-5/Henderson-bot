@@ -49,8 +49,8 @@ SSL_CTX = ssl.create_default_context(cafile=CERTS if os.path.exists(CERTS) else 
 
 # ---------- Telegram ----------
 
-def call(method, params=None, timeout=60, upload=None):
-    """Call a Telegram method. upload=(field, path) sends a local file."""
+def call(method, params=None, timeout=60, upload=None, raise_network=False):
+    """Call a Telegram method. upload=(field, path) sends a local file. Returns None on any failure."""
     if upload:
         boundary = uuid.uuid4().hex
         body = b""
@@ -77,6 +77,19 @@ def call(method, params=None, timeout=60, upload=None):
             return True
         print(f"Telegram error in {method}: {error}")
         return None
+    except (urllib.error.URLError, OSError, ValueError) as e:  # timeout, connection reset, bad reply
+        if raise_network:
+            raise
+        print(f"Telegram connection problem in {method}: {e}")
+        return None
+
+
+def save_json(path, data):
+    """Write a data file safely: a crash mid-write can't leave a half-written file."""
+    tmp = path + ".tmp"
+    with open(tmp, "w") as f:
+        json.dump(data, f)
+    os.replace(tmp, path)
 
 
 sent = {}  # chat_id -> ids of messages on the current page
@@ -102,7 +115,7 @@ def clear_page(chat_id, extra_id=None):
 
 # ---------- henderson.am ----------
 
-_cache = {}  # url -> (time, page)
+_cache = {}  # key -> {"time", "value", "failed"}: parsed site data, not whole pages (they are ~1.5 MB each)
 
 
 def fetch_raw(url):
@@ -111,28 +124,36 @@ def fetch_raw(url):
         return resp.read().decode("utf-8", "replace")
 
 
-def fetch(url):
-    hit = _cache.get(url)
-    if hit and time.time() - hit[0] < CACHE_SECONDS:
-        return hit[1]
+def cached(key, build):
+    """build() once per CACHE_SECONDS. If the site fails or changes, keep the older result
+    and don't try again for 5 minutes (each try can take up to 60 s)."""
+    hit, now = _cache.get(key), time.time()
+    if hit and (now - hit["time"] < CACHE_SECONDS or now - hit["failed"] < 300):
+        return hit["value"]
     try:
-        page = fetch_raw(url)
-    except Exception:
-        if hit:  # the site is down or slow: an older copy is better than an error
-            return hit[1]
-        raise
-    _cache[url] = (time.time(), page)
-    return page
-
-
-menu = {"time": 0, "nodes": []}  # nodes[i] = {"title", "link", "children": [ids], "parent"}
+        value = build()
+    except Exception as e:
+        if not hit:
+            raise
+        print(f"Site problem ({key}), using the saved copy:", type(e).__name__, e)
+        hit["failed"] = now
+        return hit["value"]
+    _cache[key] = {"time": now, "value": value, "failed": 0}
+    return value
 
 
 def load_menu():
-    """Read the category tree from the site's own menu."""
-    if menu["nodes"] and time.time() - menu["time"] < CACHE_SECONDS:
-        return menu["nodes"]
-    page = fetch(SITE + "/")
+    """The category tree from the site's own menu: nodes[i] = {"title", "link", "children": [ids], "parent"}."""
+    return cached("menu", read_menu)["nodes"]
+
+
+def catalog_links():
+    """Every catalog link on the home page (some, like belts, aren't in the menu)."""
+    return cached("menu", read_menu)["links"]
+
+
+def read_menu():
+    page = fetch_raw(SITE + "/")
     data = json.loads(re.search(r'id="__NUXT_DATA__"[^>]*>(.*?)</script>', page, re.S).group(1))
 
     def r(i):
@@ -170,18 +191,16 @@ def load_menu():
 
     for x in top:
         add(x, None)
-    menu.update(time=time.time(), nodes=nodes)
-    return nodes
-
-
-_parsed = {}  # link -> (page, products): parse each downloaded page only once
+    return {"nodes": nodes, "links": {l.rstrip("/") for l in re.findall(r'href="(/catalog/[^"?#]+)"', page)}}
 
 
 def load_products(link):
-    page = fetch(SITE + link)
-    hit = _parsed.get(link)
-    if hit and hit[0] is page:
-        return hit[1]
+    """The products on a category page. (The site shows the first 36; the rest come from its protected API.)"""
+    return cached("products:" + link, lambda: read_products(link))
+
+
+def read_products(link):
+    page = fetch_raw(SITE + link)
     products = []
     for card in page.split('class="productCart"')[1:]:
         url = re.search(r'href="(/product/[^"]+)"', card)
@@ -198,7 +217,6 @@ def load_products(link):
                 "color": htmllib.unescape(color.group(1)).strip().lower() if color else "",
                 "url": SITE + url.group(1),
             })
-    _parsed[link] = (page, products)
     return products
 
 
@@ -295,7 +313,11 @@ LANG_FILE = os.path.join(DATA_DIR, "langs.json")  # chat_id -> "en" / "ru" / "hy
 try:
     with open(LANG_FILE) as f:
         langs = json.load(f)
-except (OSError, ValueError):
+except OSError:
+    langs = {}
+except ValueError:  # damaged file: keep a copy instead of overwriting everyone's choice
+    print("langs.json is damaged; saved a copy as langs.json.bad")
+    os.replace(LANG_FILE, LANG_FILE + ".bad")
     langs = {}
 
 
@@ -305,8 +327,7 @@ def lang_of(chat_id):
 
 def set_lang(chat_id, lang):
     langs[str(chat_id)] = lang
-    with open(LANG_FILE, "w") as f:
-        json.dump(langs, f)
+    save_json(LANG_FILE, langs)
 
 
 def t(key, lang):
@@ -358,6 +379,10 @@ def other_prices(amd):
 INDEX_HOURS = 12      # rebuild the search list this often
 INDEX_PAUSE = 1.5     # seconds between category pages, to go easy on the site
 index = {"items": [], "time": 0}
+
+
+def index_items():
+    return index["items"]
 searches = {}  # chat_id -> {"q": text, "items": [...]} – the last search results
 INDEX_FILE = os.path.join(os.environ.get("DATA_DIR", HERE), "search-index.json")
 
@@ -367,8 +392,8 @@ def build_index():
     # every catalog page: the menu plus all catalog links on the home page (e.g. belts aren't in the menu)
     tops = {n["link"].rstrip("/") for n in load_menu() if n["parent"] is None}
     links = {n["link"].rstrip("/") for n in load_menu()}
-    links |= {l.rstrip("/") for l in re.findall(r'href="(/catalog/[^"?#]+)"', fetch(SITE + "/"))}
-    found = {}
+    links |= catalog_links()
+    found, failed = {}, 0
     for link in sorted(links - tops):
         slug = link.split("/")[-1]
         try:
@@ -377,13 +402,15 @@ def build_index():
                 entry["cats"].add(slug)
         except Exception as e:
             print("Search list: skipped a page:", e)
+            failed += 1
         time.sleep(INDEX_PAUSE)
+    if failed > len(links) // 4 or len(found) < len(index["items"]) // 2:  # the site was having problems
+        raise RuntimeError(f"only {len(found)} products, {failed} pages failed; keeping the old list")
     index.update(items=list(found.values()), time=time.time())
     print(f"Search list ready: {len(index['items'])} products")
     try:  # keep a copy so the search works right after a restart
-        with open(INDEX_FILE, "w") as f:
-            json.dump({"time": index["time"],
-                       "items": [{**p, "cats": sorted(p["cats"])} for p in index["items"]]}, f)
+        save_json(INDEX_FILE, {"time": index["time"],
+                               "items": [{**p, "cats": sorted(p["cats"])} for p in index["items"]]})
     except OSError as e:
         print("Could not save the search list:", e)
 
@@ -406,9 +433,39 @@ def index_loop():
             time.sleep(300)
 
 
+RU_ENDINGS = {"", "ый", "ий", "ой", "ая", "яя", "ое", "ее", "ые", "ие", "ых", "их", "ую", "юю", "ого", "его",
+              "ому", "ему", "ым", "им", "ыми", "ими", "а", "у", "ы", "и", "е", "ом", "ам", "ах", "ов", "ей"}
+STOP_WORDS = {"для", "в", "во", "на", "с", "со", "и", "или", "по", "из", "от", "до", "к", "у", "мне", "есть",
+              "хочу", "нужен", "нужна", "нужно", "нужны", "какие", "какой", "a", "an", "the", "for", "with",
+              "and", "or", "in", "of", "to", "i", "me", "need", "want", "some", "any", "do", "you", "have"}
+COLOR_CODES = {"blk": "black", "brw": "brown", "nav": "navy", "wht": "white", "gry": "grey", "bge": "beige"}
+
+
+def colors_of(code):
+    """Site colour code → plain colours: "dnavy" → navy, "navy1" → navy, "blk/brw" → black, brown."""
+    out = set()
+    for part in code.split("/"):
+        part = COLOR_CODES.get(part.rstrip("0123456789"), part.rstrip("0123456789"))
+        out |= {part, part[1:]} if part[:1] in ("d", "l") and len(part) > 4 else {part}
+        out.add(COLOR_CODES.get(part[1:], ""))
+    return out
+
+
+def stem_match(w, word):
+    """A Russian word form of a stem: "черные", "черную" → "черн"; but not "сертификат" → "сер"."""
+    return w.startswith(word) and w[len(word):] in RU_ENDINGS
+
+
+def name_match(w, name):
+    """A whole word of a category name, or its plural ("shirt" → "shirts", but not "t-shirts" or "suitcases")."""
+    return w == name or any(x == w or (x.startswith(w) and len(x) - len(w) <= 2) for x in name.split())
+
+
 def search_products(q):
     """Products matching every word of q (Russian, English or Armenian): name, colour or category."""
     q = " ".join(q.lower().replace("ё", "е").split())
+    if any(w not in STOP_WORDS for w in q.split()):  # "свитер для зимы" → "свитер зимы"
+        q = " ".join(w for w in q.split() if w not in STOP_WORDS)
     all_cats = [(n["link"].rstrip("/").split("/")[-1],
                  [n["title"].lower()] + [x.lower() for x in
                                          CATEGORY_NAMES.get(n["link"].rstrip("/").split("/")[-1], ())])
@@ -416,17 +473,16 @@ def search_products(q):
 
     def word_matcher(w):
         terms = {w}
+        if not w.isascii() and len(w) >= 5:  # Russian case endings: "рубашку" → "рубашк" (in "рубашка")
+            terms.add(w[:-2] if w[-2:] in RU_ENDINGS else w[:-1])
         for word, stems in SEARCH_WORDS.items():
-            if (w == word or w.rstrip("s") == word.rstrip("s") or (len(w) >= 4 and word.startswith(w))
-                    or (not word.isascii() and len(word) >= 3 and w.startswith(word))):  # Russian endings
+            if (w == word or w.rstrip("s") == word.rstrip("s")  # "card" is not "cardigan"
+                    or (len(w) >= 4 and word.startswith(w) and len(word) - len(w) <= 2)
+                    or (not word.isascii() and len(word) >= 3 and stem_match(w, word))):
                 terms.update(stems)
-        cats = {slug for slug, names in all_cats
-                if any(w == x or (len(w) >= 4 and (w in x or x.startswith(w))) for x in names)}
-        # a colour also matches its dark and light shades on the site ("dnavy", "lgrey")
-        return lambda p: (any(term in p["name"].lower().replace("ё", "е")
-                              or term in (p["color"], p["color"][1:] if p["color"][:1] in ("d", "l") else "")
-                              for term in terms)
-                          or bool(p["cats"] & cats))
+        cats = {slug for slug, names in all_cats if any(len(w) >= 3 and name_match(w, x) for x in names)}
+        return lambda p: (any(term in p["name"].lower().replace("ё", "е") for term in terms)
+                          or bool(colors_of(p["color"]) & terms) or bool(p["cats"] & cats))
 
     # two-word phrases first ("bow tie", "gift card"), then single words
     words = q.split()
@@ -434,7 +490,11 @@ def search_products(q):
         q = q.replace(phrase, phrase.replace(" ", "_"))
     words = [w.replace("_", " ") for w in q.split()]
     matchers = [word_matcher(w) for w in words]
-    return [p for p in index["items"] if all(m(p) for m in matchers)][:60]
+    found = [p for p in index["items"] if all(m(p) for m in matchers)]
+    if not found and len(matchers) > 1:  # a sentence: keep only the words that find something
+        matchers = [m for m in matchers if any(m(p) for p in index["items"])]
+        found = [p for p in index["items"] if all(m(p) for m in matchers)] if matchers else []
+    return found[:60]
 
 
 def ask_search(chat_id, lang):
@@ -465,28 +525,30 @@ def run_search(chat_id, lang, q):
 
 def load_promos():
     """Current offers from henderson.am/offers/: [(slug, Russian title, valid-until date)]."""
-    page = fetch(SITE + "/offers/")
+    today = tuple(time.gmtime(time.time() + 4 * 3600)[:3])  # the date in Yerevan (UTC+4)
+    return [p for p in cached("promos", read_promos) if tuple(map(int, reversed(p[2].split(".")))) >= today]
+
+
+def read_promos():
+    page = fetch_raw(SITE + "/offers/")
     promos, seen = [], set()
     for link, inner in re.findall(r'<a[^>]+href="/offers/([^"/]+)/?"[^>]*>(.*?)</a>', page, re.S):
         text = " ".join(htmllib.unescape(re.sub(r"<[^>]+>", " ", inner)).split())
         m = re.match(r"Действительна до (\d\d\.\d\d\.\d{4})\s+(.*?)\s*(Подробнее)?$", text)
         if not m or link in seen:
             continue
-        day, month, year = m.group(1).split(".")
-        if (int(year), int(month), int(day)) < tuple(time.localtime()[:3]):
-            continue  # already ended
         seen.add(link)
         promos.append((link, m.group(2), m.group(1)))
     return promos
 
 
 def current_promos(lang):
-    """[(name in lang, valid-until date)], or [] when the offers page is unavailable."""
+    """[(name in lang, valid-until date)]: [] when no offer is running, None when the page can't be loaded."""
     try:
         promos = load_promos()
     except Exception as e:
         print("Promotions page unavailable:", e)
-        return []
+        return None
     out = []
     for slug, title_ru, until in promos:
         names = PROMO_NAMES.get(slug)
@@ -496,8 +558,13 @@ def current_promos(lang):
 
 def send_promos(chat_id, lang):
     promos = current_promos(lang)
-    if not promos:  # site changed or unreachable: use the saved text
+    if promos is None:  # site unreachable: say so and point to the store
         send_info(chat_id, "promo", lang)
+        return
+    if not promos:
+        post(chat_id, "sendMessage", {
+            "text": f"<b>{PROMO['title'][lang]}</b>\n\n{PROMO['none'][lang]}", "parse_mode": "HTML",
+            "reply_markup": {"inline_keyboard": [[{"text": t("back", lang), "callback_data": "menu"}]]}})
         return
     lines = [f"<b>{PROMO['title'][lang]}</b>", ""]
     for name, until in promos:
@@ -622,7 +689,7 @@ def send_products(chat_id, key, index, lang, card=None):
         [{"text": "<", "callback_data": f"p:{key}:{index - 1}"},
          {"text": f"{index + 1} / {len(items)} 📋", "callback_data": f"l:{key}:{index}"},
          {"text": ">", "callback_data": f"p:{key}:{index + 1}"}],
-        [{"text": o("order_btn", lang), "callback_data": f"o:{key}:{index}"},
+        [{"text": o("order_btn", lang), "callback_data": f"o:{key}:{index}:{product_id(item)}"[:64]},
          {"text": o("call_btn", lang), "callback_data": "call:p"}],
         nav,
     ]}
@@ -670,8 +737,11 @@ def load_admin_data():
     try:
         with open(ADMIN_FILE) as f:
             data = json.load(f)
-    except (OSError, ValueError):
+    except OSError:
         data = {}
+    except ValueError:  # damaged file: don't let a stranger become the first admin
+        print("admin.json is damaged: fix or delete it on the server. Nobody can become admin until then.")
+        return {"admins": [], "damaged": True}
     if "chat_id" in data:  # older format: one admin
         data = {"admins": [{"id": data["chat_id"], "name": ""}]}
     if "admins" not in data:
@@ -682,8 +752,8 @@ def load_admin_data():
 
 
 def save_admin_data(data):
-    with open(ADMIN_FILE, "w") as f:
-        json.dump(data, f)
+    if not data.get("damaged"):
+        save_json(ADMIN_FILE, data)
 
 
 def load_admins():
@@ -713,7 +783,7 @@ def admin_command(chat_id, user, lang):
     """/admin: first person becomes admin; an admin gets the admin panel."""
     data = load_admin_data()
     ids = [a["id"] for a in data["admins"]]
-    if not ids:
+    if not ids and not data.get("damaged"):
         add_admin(chat_id, user, lang)
     elif chat_id in ids:
         send_admin_panel(chat_id, lang)
@@ -774,26 +844,51 @@ def check_reminders():
     last_check["time"] = time.time()
     try:
         end = time.mktime(time.strptime(TRIAL_END, "%Y-%m-%d"))
+    except ValueError:
+        print("TRIAL_END is not a date like 2026-11-13; no reminders")
+        return
+    try:
         with open(REMINDER_FILE) as f:
             done = json.load(f)
-    except ValueError:
-        return
-    except OSError:
+    except (OSError, ValueError):
         done = []
     days_left = (end - time.time()) / 86400
     for days in REMIND_DAYS:
         if str(days) not in done and 0 < days_left <= days:
             date = time.strftime("%d.%m.%Y", time.localtime(end))
-            for admin in load_admins():
-                call("sendMessage", {"chat_id": admin,
-                                     "text": ADMIN["trial"][lang_of(admin) or "en"].format(date=date)})
-            done.append(str(days))
-            with open(REMINDER_FILE, "w") as f:
-                json.dump(done, f)
-            print(f"Trial reminder sent ({days} days before)")
+            got = [call("sendMessage", {"chat_id": admin,
+                                        "text": ADMIN["trial"][lang_of(admin) or "en"].format(date=date)})
+                   for admin in load_admins()]
+            if any(got):  # try again next hour if nobody received it
+                done.append(str(days))
+                save_json(REMINDER_FILE, done)
+                print(f"Trial reminder sent ({days} days before)")
 
 
-orders = {}  # chat_id -> request being filled in: {"step", "item", "type", "store", "note"}
+# chat_id -> request being filled in: {"step", "item", "type", "store", "note"}; saved so a restart keeps it
+ORDER_FILE = os.path.join(DATA_DIR, "orders.json")
+try:
+    with open(ORDER_FILE) as f:
+        orders = {int(k): v for k, v in json.load(f).items()}
+except (OSError, ValueError):
+    orders = {}
+
+
+def save_orders():
+    try:
+        save_json(ORDER_FILE, orders)
+    except OSError as e:
+        print("Could not save orders:", e)
+
+
+def drop_order(chat_id, lang=None):
+    """Forget an unfinished request; at the phone step also remove the phone keyboard."""
+    order = orders.pop(chat_id, None)
+    if order:
+        save_orders()
+        if lang and order["step"] == "phone":
+            post(chat_id, "sendMessage", {"text": o("cancel", lang), "reply_markup": {"remove_keyboard": True}})
+    return order
 
 
 def cancel_row(lang):
@@ -806,13 +901,20 @@ def send_call(chat_id, lang, back="menu"):
         "reply_markup": {"inline_keyboard": [[{"text": t("back", lang), "callback_data": back}]]}})
 
 
-def start_order(chat_id, lang, key=None, index=None):
+def product_id(item):
+    return item["url"].rstrip("/").rsplit("/", 1)[-1]
+
+
+def start_order(chat_id, lang, key=None, index=None, pid=None):
     """Step 1: what kind of request. From a product card, the product is attached."""
     item = None
     if key is not None:
         items = items_of(chat_id, key)
         item = items[index % len(items)] if items else None
+        if pid and (not item or product_id(item) != pid):  # the list changed or was lost in a restart
+            item = next((i for i in items + index_items() if product_id(i) == pid), None)
     orders[chat_id] = {"step": "type", "item": item}
+    save_orders()
     kinds = ["t_order", "t_reserve"] if item else ["t_order", "t_reserve", "t_fitting", "t_mtm", "t_other"]
     rows = [[{"text": o(k, lang), "callback_data": f"ot:{k}"}] for k in kinds]
     post(chat_id, "sendMessage", {"text": o("ask_type", lang),
@@ -822,6 +924,7 @@ def start_order(chat_id, lang, key=None, index=None):
 def ask_store(chat_id, lang, kind):
     """Step 2: which store."""
     orders[chat_id].update(step="store", type=kind)
+    save_orders()
     rows = [[{"text": f"📍 {name}", "callback_data": f"os:{i}"}] for i, name in enumerate(STORES[lang])]
     post(chat_id, "sendMessage", {"text": o("ask_store", lang),
                                   "reply_markup": {"inline_keyboard": rows + [cancel_row(lang)]}})
@@ -831,13 +934,15 @@ def ask_note(chat_id, lang, store):
     """Step 3: size (for a product) or a short message (general request)."""
     order = orders[chat_id]
     order.update(step="note", store=store)
+    save_orders()
     post(chat_id, "sendMessage", {"text": o("ask_size" if order["item"] else "ask_note", lang),
                                   "reply_markup": {"inline_keyboard": [cancel_row(lang)]}})
 
 
 def ask_phone(chat_id, lang, note):
     """Step 4: phone number (button shares the Telegram contact)."""
-    orders[chat_id].update(step="phone", note="" if note.strip() == "-" else note.strip())
+    orders[chat_id].update(step="phone", note="" if note.strip() == "-" else note.strip()[:300])
+    save_orders()
     post(chat_id, "sendMessage", {"text": o("ask_phone", lang), "reply_markup": {
         "keyboard": [[{"text": o("share_phone", lang), "request_contact": True}],
                      [{"text": o("cancel", lang)}]],
@@ -870,7 +975,7 @@ def notify_admins(kind, item, store, fields, name, phone, source=""):
             print("Request (preview, not sent):\n" + text)
             sent = True
             continue
-        ok = bool(item and item["photo"] and call("sendPhoto", {
+        ok = bool(item and item["photo"] and len(text) <= 1024 and call("sendPhoto", {
             "chat_id": admin, "photo": item["photo"], "caption": text, "parse_mode": "HTML"}))
         ok = ok or bool(call("sendMessage", {"chat_id": admin, "text": text, "parse_mode": "HTML"}))
         print("Order: request sent to an admin" if ok else "Order: sending to an admin FAILED")
@@ -883,9 +988,14 @@ def notify_admins(kind, item, store, fields, name, phone, source=""):
 def finish_order(chat_id, lang, phone, user):
     """Send the request to the admin chat and thank the customer."""
     order = orders.pop(chat_id)
+    save_orders()
     item = order["item"]
-    note = [("f_size" if item else "f_note", order["note"])] if order["note"] else []
-    sent = notify_admins(order["type"], item, order["store"], note, user_name(user), phone)
+    note = [("f_size" if item else "f_note", order["note"])] if order.get("note") else []
+    try:
+        sent = notify_admins(order["type"], item, order["store"], note, user_name(user), phone)
+    except Exception as e:  # the customer must still hear back and get the phone numbers
+        print("Order: sending FAILED:", type(e).__name__, e)
+        sent = False
 
     # Confirmation also removes the phone keyboard
     post(chat_id, "sendMessage", {"text": o("sent", lang) if sent else o("not_sent", lang),
@@ -897,6 +1007,7 @@ def finish_order(chat_id, lang, phone, user):
 
 def cancel_order(chat_id, lang):
     if orders.pop(chat_id, None):
+        save_orders()
         post(chat_id, "sendMessage", {"text": o("cancel", lang), "reply_markup": {"remove_keyboard": True}})
 
 
@@ -905,11 +1016,18 @@ def handle_order_message(chat_id, lang, msg):
     order = orders.get(chat_id)
     if not order:
         return False
-    text = msg.get("text", "")
+    text = msg.get("text") or msg.get("caption") or ""
     if text == o("cancel", lang):
         cancel_order(chat_id, lang)
         send_menu(chat_id, lang)
-    elif order["step"] == "note" and text:
+    elif text.startswith("/"):  # /start or another command: leave the request
+        drop_order(chat_id, lang)
+        return False
+    elif order["step"] == "note":
+        if not text:  # a sticker or voice message: ask again in words
+            post(chat_id, "sendMessage", {"text": o("ask_size" if order["item"] else "ask_note", lang),
+                                          "reply_markup": {"inline_keyboard": [cancel_row(lang)]}})
+            return True
         print("Order: size/message received")
         ask_phone(chat_id, lang, text)
     elif order["step"] == "phone":
@@ -937,15 +1055,21 @@ def handle(update):
         if text.startswith("/start adm_"):
             use_invite(chat_id, msg.get("from", {}), lang or "en", text.split("adm_", 1)[1].strip())
             return
-        if lang and handle_order_message(chat_id, lang, msg):
-            return
-        orders.pop(chat_id, None)
-        text = msg.get("text", "").strip()
-        if lang and text and not text.startswith("/"):
-            run_search(chat_id, lang, text)
-            return
-        clear_page(chat_id)
-        send_menu(chat_id, lang) if lang else send_languages(chat_id)
+        try:
+            if lang and handle_order_message(chat_id, lang, msg):
+                return
+            drop_order(chat_id, lang)
+            text = msg.get("text", "").strip()
+            if lang and text and not text.startswith("/"):
+                run_search(chat_id, lang, text)
+                return
+            clear_page(chat_id)
+            send_menu(chat_id, lang) if lang else send_languages(chat_id)
+        except Exception as e:  # e.g. henderson.am is down: answer instead of going silent
+            print("Error:", type(e).__name__, e)
+            post(chat_id, "sendMessage", {
+                "text": t("error", lang or "en"),
+                "reply_markup": {"inline_keyboard": [[{"text": t("menu", lang or "en"), "callback_data": "menu"}]]}})
     elif "callback_query" in update:
         q = update["callback_query"]
         call("answerCallbackQuery", {"callback_query_id": q["id"]})
@@ -965,24 +1089,27 @@ def handle(update):
         try:
             # Ordering steps: keep the product card, add the questions below it
             if data == "o" or data.startswith("o:"):
-                orders.pop(chat_id, None)  # start over if one was in progress
+                drop_order(chat_id, lang)  # start over if one was in progress
                 if data == "o":
                     clear_page(chat_id, message_id)
                     start_order(chat_id, lang)
                 else:
-                    _, key, index = data.split(":")
-                    start_order(chat_id, lang, key, int(index))
+                    _, key, index, *pid = data.split(":")
+                    start_order(chat_id, lang, key, int(index), pid[0] if pid else None)
                 return
-            if data.startswith(("ot:", "os:")) and chat_id in orders:
+            if data.startswith(("ot:", "os:")):
                 call("deleteMessage", {"chat_id": chat_id, "message_id": message_id})
-                if data.startswith("ot:"):
-                    ask_store(chat_id, lang, data[3:])
-                else:
-                    ask_note(chat_id, lang, int(data[3:]))
-                return
+                order = orders.get(chat_id)
+                step = "type" if data.startswith("ot:") else "store"
+                if order and order["step"] == step:
+                    ask_store(chat_id, lang, data[3:]) if step == "type" else ask_note(chat_id, lang, int(data[3:]))
+                elif not order:  # a button from a finished or forgotten request
+                    clear_page(chat_id)
+                    send_menu(chat_id, lang)
+                return  # an old question of the current request: just removed
             if data == "ox":
                 call("deleteMessage", {"chat_id": chat_id, "message_id": message_id})
-                order = orders.pop(chat_id, None)
+                order = drop_order(chat_id, lang)
                 if not (order and order["item"]):  # general request: nothing left on screen
                     clear_page(chat_id)
                     send_menu(chat_id, lang)
@@ -1010,7 +1137,8 @@ def handle(update):
                 _, key, index = data.split(":")
                 send_products(chat_id, key, int(index), lang, card=message_id)
                 return
-            # New page: remove everything from the last one
+            # New page: remove everything from the last one, and leave any unfinished request
+            drop_order(chat_id, lang)
             clear_page(chat_id, message_id)
             if data == "menu":
                 send_menu(chat_id, lang)
@@ -1043,7 +1171,7 @@ def handle(update):
 def main():
     while True:  # keep trying if the internet is down at startup
         try:
-            me = call("getMe")
+            me = call("getMe", raise_network=True)
             break
         except urllib.error.URLError as e:
             print("No connection to Telegram, retrying:", e)
@@ -1062,7 +1190,10 @@ def main():
     while True:
         try:
             check_reminders()
-            updates = call("getUpdates", {"offset": offset, "timeout": 30}, timeout=40) or []
+            updates = call("getUpdates", {"offset": offset, "timeout": 30}, timeout=40)
+            if updates is None:  # Telegram or network error: don't hammer it
+                time.sleep(3)
+                continue
             for update in updates:
                 offset = update["update_id"] + 1
                 # short log line (commands and buttons only, no personal data)

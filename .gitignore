@@ -10,3 +10,6 @@ __pycache__/
 search-index.json
 reminders.json
 HANDOFF.md
+orders.json
+*.tmp
+*.bad

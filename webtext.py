@@ -63,11 +63,13 @@ LEGAL = {
              "enter, the item, size, store and message you choose. We do not ask for payment details."),
             ("Why", "Only to answer your request: store staff use it to call you about the order, reservation "
              "or service you asked for."),
-            ("Who sees it", "Your request is delivered to Henderson store staff through Telegram. We do not sell "
-             "or share it with anyone else."),
+            ("Who sees it", "Your request is delivered to Henderson store staff through Telegram. When the "
+             "assistant answers typed questions, your messages are processed by Anthropic, the provider of the "
+             "Claude AI model, only to write the answer. We do not sell your data or share it with anyone else."),
             ("How long", "Requests are kept in the staff's Telegram chat for as long as needed to handle them. "
-             "This site does not keep a copy."),
-            ("Cookies", "We use one cookie to remember your language. There are no advertising or tracking cookies."),
+             "The chat itself is kept on our server for up to 3 hours and then deleted."),
+            ("Stored in your browser", "Your browser remembers your language and the current chat so it "
+             "continues when you open another page. There are no cookies, ads or tracking."),
             ("Your rights", "You can ask us to delete your data or tell you what we have. Contact: [EMAIL], "
              "hotline 8248."),
             ("Who we are", "This site is run by [COMPANY], Yerevan, Armenia."),
@@ -78,11 +80,13 @@ LEGAL = {
              "запрашиваем."),
             ("Зачем", "Только чтобы ответить на заявку: сотрудники магазина звонят вам по поводу заказа, брони или "
              "услуги."),
-            ("Кто их видит", "Заявка передаётся сотрудникам магазинов Henderson через Telegram. Мы не продаём и не "
-             "передаём её третьим лицам."),
+            ("Кто их видит", "Заявка передаётся сотрудникам магазинов Henderson через Telegram. Когда помощник "
+             "отвечает на написанные вопросы, ваши сообщения обрабатывает Anthropic, поставщик ИИ-модели Claude, "
+             "только чтобы составить ответ. Мы не продаём ваши данные и не передаём их другим лицам."),
             ("Как долго", "Заявки хранятся в Telegram-чате сотрудников столько, сколько нужно для их обработки. "
-             "Сам сайт копию не хранит."),
-            ("Cookie", "Мы используем один cookie, чтобы запомнить язык. Рекламных и отслеживающих cookie нет."),
+             "Сам чат хранится на нашем сервере до 3 часов, затем удаляется."),
+            ("Что хранит браузер", "Браузер запоминает выбранный язык и текущий чат, чтобы он продолжался на "
+             "других страницах. Cookie, рекламы и отслеживания нет."),
             ("Ваши права", "Вы можете попросить удалить ваши данные или узнать, какие данные у нас есть. "
              "Контакт: [EMAIL], горячая линия 8248."),
             ("Кто мы", "Сайт работает от имени [COMPANY], Ереван, Армения."),
@@ -93,11 +97,14 @@ LEGAL = {
              "տվյալներ չենք պահանջում։"),
             ("Ինչու", "Միայն ձեր հայտին պատասխանելու համար. խանութի աշխատակիցները զանգում են ձեզ պատվերի, "
              "ամրագրման կամ ծառայության վերաբերյալ։"),
-            ("Ով է տեսնում", "Հայտը Telegram-ի միջոցով փոխանցվում է Henderson խանութների աշխատակիցներին։ Մենք "
-             "այն չենք վաճառում և չենք փոխանցում այլ անձանց։"),
+            ("Ով է տեսնում", "Հայտը Telegram-ի միջոցով փոխանցվում է Henderson խանութների աշխատակիցներին։ Երբ "
+             "օգնականը պատասխանում է գրված հարցերին, ձեր հաղորդագրությունները մշակում է Anthropic-ը՝ Claude "
+             "արհեստական բանականության մոդելի մատակարարը, միայն պատասխանը կազմելու համար։ Մենք ձեր տվյալները "
+             "չենք վաճառում և չենք փոխանցում այլ անձանց։"),
             ("Որքան ժամանակ", "Հայտերը պահվում են աշխատակիցների Telegram չաթում այնքան, որքան անհրաժեշտ է "
-             "դրանք մշակելու համար։ Կայքն ինքը պատճեն չի պահում։"),
-            ("Cookie", "Մենք օգտագործում ենք մեկ cookie՝ լեզուն հիշելու համար։ Գովազդային կամ հետևող cookie-ներ չկան։"),
+             "դրանք մշակելու համար։ Չաթը մեր սերվերում պահվում է մինչև 3 ժամ, հետո ջնջվում է։"),
+            ("Ինչ է պահում դիտարկիչը", "Դիտարկիչը հիշում է ընտրված լեզուն և ընթացիկ չաթը, որպեսզի այն "
+             "շարունակվի այլ էջերում։ Cookie-ներ, գովազդ և հետևում չկան։"),
             ("Ձեր իրավունքները", "Կարող եք խնդրել ջնջել ձեր տվյալները կամ իմանալ, թե ինչ տվյալներ ունենք։ "
              "Կապ՝ [EMAIL], թեժ գիծ 8248։"),
             ("Ովքեր ենք մենք", "Կայքը գործում է [COMPANY]-ի անունից, Երևան, Հայաստան։"),
